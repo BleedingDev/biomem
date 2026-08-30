@@ -1,0 +1,1436 @@
+name: Publish browser channels
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      tag:
+        required: true
+        type: string
+      channels:
+        required: false
+        default: none
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      reuse_release_policy_artifact:
+        description: Reuse the caller's release-policy artifact for the Apple boundary
+        required: false
+        default: false
+        type: boolean
+      apple_common_credentials_configured:
+        description: Boolean presence signal for common Apple credentials
+        required: false
+        default: false
+        type: boolean
+      apple_safari_credentials_configured:
+        description: Boolean presence signal for Safari provisioning profiles
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      CWS_CLIENT_ID:
+        required: false
+      CWS_CLIENT_SECRET:
+        required: false
+      CWS_REFRESH_TOKEN:
+        required: false
+      AMO_JWT_ISSUER:
+        required: false
+      AMO_JWT_SECRET:
+        required: false
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full immutable source commit SHA
+        required: true
+        type: string
+      tag:
+        description: Exact vMAJOR.MINOR.PATCH release tag
+        required: true
+        type: string
+      channels:
+        description: Exact comma-separated browser channels, or none
+        required: true
+        default: none
+        type: string
+      dry_run:
+        description: Build and validate without contacting a store
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: browser-channels-${{ inputs.tag }}-${{ inputs.source_sha }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Resolve immutable browser policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      chrome: ${{ steps.selection.outputs.chrome }}
+      firefox: ${{ steps.selection.outputs.firefox }}
+      safari: ${{ steps.selection.outputs.safari }}
+      version: ${{ steps.selection.outputs.version }}
+    steps:
+      - name: Reject a mutable or malformed source reference
+        env:
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$RELEASE_DRY_RUN" != "true" ]]; then
+            [[ "$WORKFLOW_REF" == "refs/tags/$RELEASE_TAG" ]]
+            [[ "$WORKFLOW_SHA" == "$SOURCE_SHA" ]]
+          fi
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve exact channel selection
+        id: selection
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_CHANNELS: ${{ inputs.channels }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          if [[ "$RELEASE_DRY_RUN" != "true" ]]; then
+            [[ "$(git rev-parse "$RELEASE_TAG^{commit}")" == "$SOURCE_SHA" ]]
+          fi
+          python3 scripts/release_policy.py policy \
+            --tag "$RELEASE_TAG" \
+            --channels "$RELEASE_CHANNELS" \
+            --dry-run "$RELEASE_DRY_RUN" \
+            --output release-policy.json
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          policy = json.loads(Path("release-policy.json").read_text())
+          selected = set(policy["selected_optional_channels"])
+          with Path(sys.argv[1]).open("a", encoding="utf-8") as output:
+              output.write(f"chrome={str('chrome_web_store' in selected).lower()}\n")
+              output.write(f"firefox={str('firefox_amo' in selected).lower()}\n")
+              output.write(f"safari={str('safari_public' in selected).lower()}\n")
+              output.write(f"version={policy['version']}\n")
+          PY
+      - name: Upload resolved policy
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-release-policy
+          path: release-policy.json
+          if-no-files-found: error
+          retention-days: 14
+      - name: Provide policy to the standalone Apple boundary
+        if: ${{ !inputs.reuse_release_policy_artifact }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-policy
+          path: release-policy.json
+          if-no-files-found: error
+          retention-days: 14
+
+  build-inputs:
+    name: Build and classify tested browser inputs once
+    needs: preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      chrome_sha256: ${{ steps.classify.outputs.chrome_sha256 }}
+      firefox_sha256: ${{ steps.classify.outputs.firefox_sha256 }}
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Build public Chrome input and CI-only Firefox input
+        run: ./scripts/build_extensions.sh --no-crx --no-safari
+      - name: Verify exact artifact classes, versions, and contents
+        id: classify
+        env:
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          from pathlib import PurePosixPath
+          import stat
+          import zipfile
+          import os
+
+          def iso_boxes(data):
+              offset = 0
+              while offset + 8 <= len(data):
+                  size = int.from_bytes(data[offset:offset + 4], "big")
+                  kind = data[offset + 4:offset + 8]
+                  header = 8
+                  if size == 1:
+                      if offset + 16 > len(data):
+                          return
+                      size = int.from_bytes(data[offset + 8:offset + 16], "big")
+                      header = 16
+                  elif size == 0:
+                      size = len(data) - offset
+                  if size < header or offset + size > len(data):
+                      return
+                  yield kind, data[offset + header:offset + size]
+                  offset += size
+
+          def unsafe_image_format(data):
+              if data.startswith(b"icns"):
+                  return "icns"
+              if data.startswith(b"\xff\x0a"):
+                  return "jxl-codestream"
+              if data[:8] == b"\x00\x00\x00\x00JXL ":
+                  return "jxl-container-malformed"
+              boxes = list(iso_boxes(data))
+              if boxes and boxes[0][0] == b"JXL " and any(
+                  kind == b"ftyp" and payload[:4] == b"jxl "
+                  for kind, payload in boxes
+              ):
+                  return "jxl-container"
+              heif_brands = {b"avif", b"mif1", b"msf1", b"heic", b"heix", b"hevc", b"hevx"}
+              if boxes and boxes[0][0] == b"ftyp" and boxes[0][1][:4] in heif_brands:
+                  return "heif"
+              return None
+
+          dist = Path("dist")
+          classification = json.loads((dist / "browser-artifacts.json").read_text())
+          by_name = {item["name"]: item for item in classification["artifacts"]}
+          if set(by_name) != {"chrome-biomem.zip", "firefox-biomem-unsigned.xpi"}:
+              raise SystemExit(f"unexpected browser inputs: {sorted(by_name)}")
+          chrome = by_name["chrome-biomem.zip"]
+          firefox = by_name["firefox-biomem-unsigned.xpi"]
+          if chrome["release_visibility"] != "public_inspection":
+              raise SystemExit("Chrome ZIP must be the one inspectable public store input")
+          if firefox["release_visibility"] != "ci_only" or firefox["distributable"]:
+              raise SystemExit("unsigned Firefox XPI must remain CI-only and non-distributable")
+          for filename in by_name:
+              with zipfile.ZipFile(dist / filename) as archive:
+                  if len(archive.namelist()) != len(set(archive.namelist())):
+                      raise SystemExit(f"duplicate ZIP entries in {filename}")
+                  aggregate_size = 0
+                  for info in archive.infolist():
+                      name = info.filename
+                      path = PurePosixPath(name)
+                      if name.startswith("/") or "\\" in name or ".." in path.parts:
+                          raise SystemExit(f"unsafe ZIP path in {filename}: {name}")
+                      if stat.S_ISLNK(info.external_attr >> 16):
+                          raise SystemExit(f"symlink ZIP entry in {filename}: {name}")
+                      if info.is_dir():
+                          continue
+                      if info.file_size > 20 * 1024 * 1024:
+                          raise SystemExit(f"oversized ZIP entry in {filename}: {name}")
+                      aggregate_size += info.file_size
+                      if aggregate_size > 50 * 1024 * 1024:
+                          raise SystemExit(f"oversized expanded archive: {filename}")
+                      data = archive.read(info)
+                      unsafe_kind = unsafe_image_format(data)
+                      if unsafe_kind:
+                          raise SystemExit(
+                              f"forbidden image parser input in {filename}: {name} ({unsafe_kind})"
+                          )
+                      if data.startswith(b"\x89PNG\r\n\x1a\n") and info.file_size > 5 * 1024 * 1024:
+                          raise SystemExit(f"oversized PNG in {filename}: {name}")
+                      if name.lower().endswith(".png") and not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                          raise SystemExit(f"invalid PNG signature in {filename}: {name}")
+                  manifest = json.loads(archive.read("manifest.json"))
+                  if manifest["version"] != os.environ["RELEASE_VERSION"]:
+                      raise SystemExit(f"version mismatch in {filename}")
+                  forbidden = [
+                      name for name in archive.namelist()
+                      if name.lower().endswith((".pem", ".crx", ".xpi", ".icns", ".jxl", ".heif", ".heic"))
+                  ]
+                  if forbidden:
+                      raise SystemExit(f"forbidden nested artifact in {filename}: {forbidden}")
+                  # web-ext 10.6.0 currently reaches image-size 2.0.2 through
+                  # addons-linter. Upstream has no patched image-size release
+                  # yet, so the extension-independent magic checks above keep
+                  # those parsers away from the immutable signing input.
+          with zipfile.ZipFile(dist / "firefox-biomem-unsigned.xpi") as archive:
+              if any(name.upper().startswith("META-INF/") for name in archive.namelist()):
+                  raise SystemExit("unsigned AMO input unexpectedly contains signature metadata")
+          PY
+          mkdir -p browser-chrome browser-firefox-ci
+          cp dist/chrome-biomem.zip browser-chrome/
+          cp dist/firefox-biomem-unsigned.xpi browser-firefox-ci/
+          cp dist/browser-artifacts.json browser-chrome/
+          cp dist/browser-artifacts.json browser-firefox-ci/
+          echo "chrome_sha256=$(sha256sum dist/chrome-biomem.zip | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "firefox_sha256=$(sha256sum dist/firefox-biomem-unsigned.xpi | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+      - name: Upload inspectable Chrome store input
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-public-chrome-input-${{ steps.classify.outputs.chrome_sha256 }}
+          path: browser-chrome/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload unsigned Firefox input as CI-only
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-ci-only-firefox-unsigned-input-${{ steps.classify.outputs.firefox_sha256 }}
+          path: browser-firefox-ci/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Create exact current-run Chrome handoff
+        env:
+          CHROME_SHA256: ${{ steps.classify.outputs.chrome_sha256 }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir browser-chrome-ready
+          cp dist/chrome-biomem.zip browser-chrome-ready/
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          archive = Path("browser-chrome-ready/chrome-biomem.zip")
+          Path("browser-chrome-ready/verified-chrome.json").write_text(json.dumps({
+              "filename": archive.name,
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "run_id": int(os.environ["RUN_ID"]),
+              "sha256": os.environ["CHROME_SHA256"],
+              "size": archive.stat().st_size,
+              "source_sha": os.environ["SOURCE_SHA"],
+              "tag": os.environ["RELEASE_TAG"],
+              "version": os.environ["RELEASE_VERSION"],
+          }, sort_keys=True) + "\n")
+          PY
+      - name: Upload exact current-run Chrome handoff
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-ready-chrome-current-${{ github.run_id }}-${{ github.run_attempt }}
+          path: browser-chrome-ready/
+          if-no-files-found: error
+          retention-days: 2
+
+  chrome-web-store:
+    name: Chrome Web Store v2 boundary
+    needs: [preflight, build-inputs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: browser-release-policy
+          path: policy
+      - name: Download tested Chrome ZIP
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: browser-public-chrome-input-${{ needs.build-inputs.outputs.chrome_sha256 }}
+          path: chrome-input
+      - name: Classify Chrome readiness without contacting Google
+        id: readiness
+        env:
+          SELECTED: ${{ needs.preflight.outputs.chrome }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          CWS_PUBLISH_ENABLED: ${{ vars.CWS_PUBLISH_ENABLED }}
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+        shell: bash
+        run: |
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          selected = os.environ["SELECTED"] == "true"
+          dry_run = os.environ["DRY_RUN"] == "true"
+          immutable_id = json.loads(
+              Path("policy/release-policy.json").read_text()
+          )["package_identifiers"].get("chrome", "")
+          required = [
+              "CWS_PUBLISHER_ID", "CWS_ITEM_ID",
+              "CWS_CLIENT_ID", "CWS_CLIENT_SECRET", "CWS_REFRESH_TOKEN",
+          ]
+          missing = [name for name in required if not os.environ.get(name)]
+          if not selected:
+              status, reason, attempt = "skipped_not_configured", "not_selected", False
+          elif dry_run:
+              status, reason, attempt = "blocked_environment", "not_attempted_dry_run", False
+          elif os.environ.get("CWS_PUBLISH_ENABLED") != "true":
+              status, reason, attempt = "blocked_environment", "manual_enablement_required", False
+          elif missing:
+              status, reason, attempt = "blocked_environment", "missing_provider_configuration", False
+          elif not immutable_id:
+              status, reason, attempt = "blocked_environment", "immutable_store_identity_not_configured", False
+          elif not __import__("re").fullmatch(r"[a-p]{32}", immutable_id):
+              status, reason, attempt = "failed", "invalid_immutable_store_identity", False
+          elif not __import__("re").fullmatch(r"[a-p]{32}", os.environ["CWS_ITEM_ID"]):
+              status, reason, attempt = "failed", "invalid_store_identity", False
+          elif not __import__("re").fullmatch(r"[A-Za-z0-9_-]+", os.environ["CWS_PUBLISHER_ID"]):
+              status, reason, attempt = "failed", "invalid_publisher_identity", False
+          elif os.environ["CWS_ITEM_ID"] != immutable_id:
+              status, reason, attempt = "failed", "identity_configuration_mismatch", False
+          else:
+              status, reason, attempt = "ready", "provider_configured", True
+          Path("chrome-result.json").write_text(json.dumps({
+              "attempt": attempt, "reason": reason, "status": status,
+          }, sort_keys=True) + "\n")
+          with Path(sys.argv[1]).open("a", encoding="utf-8") as output:
+              output.write(f"attempt={str(attempt).lower()}\n")
+          PY
+      - name: Upload and submit the exact tested ZIP
+        if: steps.readiness.outputs.attempt == 'true'
+        env:
+          CWS_PUBLISHER_ID: ${{ vars.CWS_PUBLISHER_ID }}
+          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        shell: bash
+        run: |
+          set +e
+          write_result() {
+            python3 - "$1" "$2" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          Path("chrome-result.json").write_text(json.dumps({
+              "attempt": True, "status": sys.argv[1], "reason": sys.argv[2],
+          }, sort_keys=True) + "\n")
+          PY
+          }
+          classify_http_failure() {
+            case "$1" in
+              400|422) write_result failed "invalid_${2}_package_or_version" ;;
+              404) write_result failed "provider_${2}_item_not_found" ;;
+              401|403) write_result blocked_environment provider_authentication_or_permission_required ;;
+              409) write_result blocked_environment store_review_or_manual_action_required ;;
+              429|5??|000) write_result blocked_environment provider_rate_limit_or_unavailable ;;
+              *) write_result failed "unexpected_${2}_provider_response" ;;
+            esac
+          }
+          write_result failed chrome_publish_state_machine_incomplete
+          umask 077
+          chmod 700 "$RUNNER_TEMP"
+          token_file="$RUNNER_TEMP/cws-token.json"
+          trap 'rm -f -- "$token_file"' EXIT
+          token_transport=0
+          token_code=$(curl --silent --show-error --output "$token_file" --write-out '%{http_code}' \
+            --data-urlencode "client_id=$CWS_CLIENT_ID" \
+            --data-urlencode "client_secret=$CWS_CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$CWS_REFRESH_TOKEN" \
+            --data-urlencode 'grant_type=refresh_token' \
+            https://oauth2.googleapis.com/token) || token_transport=$?
+          if [[ $token_transport -ne 0 ]]; then
+            write_result blocked_environment provider_transport_unavailable
+            exit 0
+          fi
+          if [[ "$token_code" != 200 ]]; then
+            write_result blocked_environment provider_authentication_or_permission_required
+            exit 0
+          fi
+          access_token=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["access_token"])' "$token_file")
+          if [[ -z "$access_token" ]]; then
+            write_result blocked_environment provider_authentication_or_permission_required
+            exit 0
+          fi
+          base="https://chromewebstore.googleapis.com"
+          item="publishers/$CWS_PUBLISHER_ID/items/$CWS_ITEM_ID"
+
+          # Resume safely when a prior attempt already submitted or published
+          # this exact manifest version. Never overwrite a pending revision.
+          status_transport=0
+          status_code=$(curl --silent --show-error --output cws-status.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $access_token" "$base/v2/$item:fetchStatus") || status_transport=$?
+          if [[ $status_transport -ne 0 ]]; then
+            write_result blocked_environment provider_transport_unavailable
+            exit 0
+          fi
+          if [[ "$status_code" == 200 ]]; then
+            python3 - "$CWS_ITEM_ID" "$RELEASE_VERSION" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          try:
+              response = json.loads(Path("cws-status.json").read_text())
+              if not isinstance(response, dict):
+                  raise TypeError("status response is not an object")
+          except Exception:
+              result, code = {"attempt": True, "status": "failed", "reason": "malformed_store_status"}, 40
+          else:
+              if response.get("itemId") != sys.argv[1]:
+                  result, code = {"attempt": True, "status": "failed", "reason": "provider_identity_mismatch"}, 40
+              else:
+                  expected = sys.argv[2]
+                  published = response.get("publishedItemRevisionStatus") or {}
+                  submitted = response.get("submittedItemRevisionStatus") or {}
+                  def channels(value):
+                      if not isinstance(value, dict):
+                          return []
+                      rows = value.get("distributionChannels") or []
+                      return rows if isinstance(rows, list) else []
+                  published_rows = channels(published)
+                  submitted_rows = channels(submitted)
+                  published_exact = [row for row in published_rows if isinstance(row, dict) and row.get("crxVersion") == expected]
+                  published_versions = {
+                      row.get("crxVersion") for row in published_rows if isinstance(row, dict)
+                  }
+                  submitted_versions = {
+                      row.get("crxVersion") for row in submitted_rows if isinstance(row, dict)
+                  }
+                  if not isinstance(published, dict) or not isinstance(submitted, dict):
+                      result, code = {"attempt": True, "status": "failed", "reason": "malformed_store_revision_status"}, 40
+                  elif response.get("takenDown"):
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "store_item_taken_down"}, 20
+                  elif response.get("warned"):
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "store_policy_warning_requires_manual_action"}, 20
+                  elif published_exact and published.get("state") == "PUBLISHED" and published_versions != {expected}:
+                      result, code = {"attempt": True, "status": "failed", "reason": "mixed_published_versions"}, 40
+                  elif published_exact and published.get("state") == "PUBLISHED" and all(row.get("deployPercentage") == 100 for row in published_exact):
+                      result, code = {"attempt": True, "status": "published", "reason": "verified_existing_store_state"}, 20
+                  elif published_exact and published.get("state") == "PUBLISHED":
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "store_rollout_not_fully_deployed"}, 20
+                  elif expected in submitted_versions and submitted.get("state") in {"PENDING_REVIEW", "STAGED"}:
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "store_review_pending"}, 20
+                  elif expected in submitted_versions and submitted.get("state") in {"REJECTED", "CANCELLED"}:
+                      result, code = {"attempt": True, "status": "failed", "reason": "store_submission_rejected"}, 40
+                  elif submitted.get("state") in {"PENDING_REVIEW", "STAGED"} and submitted_versions:
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "different_store_revision_pending"}, 20
+                  elif response.get("lastAsyncUploadState") == "IN_PROGRESS":
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "async_upload_already_in_progress"}, 20
+                  elif response.get("lastAsyncUploadState") == "SUCCEEDED":
+                      result, code = {"attempt": True, "status": "blocked_environment", "reason": "prior_async_upload_version_unverifiable"}, 20
+                  elif response.get("lastAsyncUploadState") not in {None, "FAILED", "NOT_FOUND"}:
+                      result, code = {"attempt": True, "status": "failed", "reason": "unexpected_prior_async_upload_state"}, 40
+                  else:
+                      result, code = None, 0
+          if result:
+              Path("chrome-result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          raise SystemExit(code)
+          PY
+            resume_status=$?
+            if [[ $resume_status -ne 0 ]]; then exit 0; fi
+          elif [[ "$status_code" != 200 ]]; then
+            classify_http_failure "$status_code" status
+            exit 0
+          fi
+
+          upload_transport=0
+          upload_code=$(curl --silent --show-error --output cws-upload.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $access_token" -X POST \
+            -T chrome-input/chrome-biomem.zip "$base/upload/v2/$item:upload") || upload_transport=$?
+          if [[ $upload_transport -ne 0 ]]; then
+            write_result blocked_environment provider_transport_unavailable
+            exit 0
+          fi
+          if [[ "$upload_code" -lt 200 || "$upload_code" -ge 300 ]]; then
+            classify_http_failure "$upload_code" upload
+            exit 0
+          fi
+          python3 - "$CWS_ITEM_ID" "$RELEASE_VERSION" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          try:
+              response = json.loads(Path("cws-upload.json").read_text())
+              if not isinstance(response, dict):
+                  raise TypeError("upload response is not an object")
+          except Exception:
+              result, code = {"attempt": True, "status": "failed", "reason": "malformed_upload_response"}, 40
+          else:
+              state = response.get("uploadState")
+              if response.get("itemId") != sys.argv[1]:
+                  result, code = {"attempt": True, "status": "failed", "reason": "provider_identity_mismatch"}, 40
+              elif response.get("crxVersion") and response["crxVersion"] != sys.argv[2]:
+                  result, code = {"attempt": True, "status": "failed", "reason": "provider_version_mismatch"}, 40
+              elif state == "IN_PROGRESS":
+                  result, code = None, 50
+              elif state != "SUCCEEDED" or response.get("crxVersion") != sys.argv[2]:
+                  result, code = {"attempt": True, "status": "failed", "reason": "unverified_upload_state_or_version"}, 40
+              else:
+                  result, code = None, 0
+          if result:
+              Path("chrome-result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          raise SystemExit(code)
+          PY
+          upload_state=$?
+          if [[ $upload_state -eq 50 ]]; then
+            for _ in {1..10}; do
+              poll_transport=0
+              poll_code=$(curl --silent --show-error --output cws-status.json --write-out '%{http_code}' \
+                -H "Authorization: Bearer $access_token" "$base/v2/$item:fetchStatus") || poll_transport=$?
+              if [[ $poll_transport -ne 0 ]]; then
+                write_result blocked_environment provider_transport_unavailable
+                exit 0
+              fi
+              if [[ "$poll_code" != 200 ]]; then
+                classify_http_failure "$poll_code" async_upload
+                exit 0
+              fi
+              async_state=$(python3 - "$CWS_ITEM_ID" <<'PY'
+          import json
+          import sys
+          value = json.load(open("cws-status.json"))
+          if value.get("itemId") != sys.argv[1]:
+              print("IDENTITY_MISMATCH")
+          else:
+              print(value.get("lastAsyncUploadState", "UNKNOWN"))
+          PY
+              )
+              case "$async_state" in
+                IN_PROGRESS) sleep 3 ;;
+                SUCCEEDED)
+                  write_result blocked_environment async_upload_completed_version_unverifiable
+                  exit 0 ;;
+                IDENTITY_MISMATCH) write_result failed provider_identity_mismatch; exit 0 ;;
+                FAILED) write_result failed invalid_upload_package_or_version; exit 0 ;;
+                NOT_FOUND) write_result failed async_upload_not_found; exit 0 ;;
+                *) write_result failed unexpected_async_upload_state; exit 0 ;;
+              esac
+            done
+            write_result blocked_environment async_upload_poll_timeout
+            exit 0
+          elif [[ $upload_state -ne 0 ]]; then
+            exit 0
+          fi
+          publish_transport=0
+          publish_code=$(curl --silent --show-error --output cws-publish.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $access_token" -H 'Content-Type: application/json' \
+            -X POST -d '{"publishType":"DEFAULT_PUBLISH","blockOnWarnings":true}' \
+            "$base/v2/$item:publish") || publish_transport=$?
+          if [[ $publish_transport -ne 0 ]]; then
+            write_result blocked_environment provider_transport_unavailable
+            exit 0
+          fi
+          if [[ "$publish_code" -lt 200 || "$publish_code" -ge 300 ]]; then
+            classify_http_failure "$publish_code" publish
+            exit 0
+          fi
+          python3 - "$CWS_ITEM_ID" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          result = None
+          try:
+              response = json.loads(Path("cws-publish.json").read_text())
+              if not isinstance(response, dict):
+                  raise TypeError("publish response is not an object")
+          except Exception:
+              response = {}
+              result = {"attempt": True, "status": "failed", "reason": "malformed_publish_response"}
+          if result is not None:
+              pass
+          elif response.get("itemId") != sys.argv[1]:
+              result = {"attempt": True, "status": "failed", "reason": "provider_identity_mismatch"}
+          elif response.get("state") == "PUBLISHED":
+              result = None
+          elif response.get("state") == "PUBLISHED_TO_TESTERS":
+              result = {"attempt": True, "status": "blocked_environment", "reason": "store_visibility_not_public"}
+          elif response.get("state") in {"PENDING_REVIEW", "STAGED"}:
+              result = {"attempt": True, "status": "blocked_environment", "reason": "store_review_pending"}
+          else:
+              result = {"attempt": True, "status": "failed", "reason": "unexpected_store_state"}
+          if result is not None:
+              Path("chrome-result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+              raise SystemExit(20)
+          PY
+          publish_state=$?
+          if [[ $publish_state -ne 0 ]]; then
+            exit 0
+          fi
+          post_status_transport=0
+          post_status_code=$(curl --silent --show-error --output cws-post-publish-status.json --write-out '%{http_code}' \
+            -H "Authorization: Bearer $access_token" "$base/v2/$item:fetchStatus") || post_status_transport=$?
+          if [[ $post_status_transport -ne 0 ]]; then
+            write_result blocked_environment provider_transport_unavailable
+            exit 0
+          fi
+          if [[ "$post_status_code" -lt 200 || "$post_status_code" -ge 300 ]]; then
+            classify_http_failure "$post_status_code" post_publish_status
+            exit 0
+          fi
+          python3 - "$CWS_ITEM_ID" "$RELEASE_VERSION" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          try:
+              response = json.loads(Path("cws-post-publish-status.json").read_text())
+              if not isinstance(response, dict):
+                  raise TypeError("post-publish status is not an object")
+          except Exception:
+              result = {"attempt": True, "status": "failed", "reason": "malformed_post_publish_status"}
+          else:
+              published = response.get("publishedItemRevisionStatus") or {}
+              rows = published.get("distributionChannels") or [] if isinstance(published, dict) else []
+              rows = rows if isinstance(rows, list) else []
+              versions = {
+                  row.get("crxVersion") for row in rows if isinstance(row, dict)
+              }
+              exact_rows = [
+                  row for row in rows
+                  if isinstance(row, dict) and row.get("crxVersion") == sys.argv[2]
+              ]
+              if response.get("itemId") != sys.argv[1]:
+                  result = {"attempt": True, "status": "failed", "reason": "provider_identity_mismatch"}
+              elif not isinstance(published, dict):
+                  result = {"attempt": True, "status": "failed", "reason": "malformed_post_publish_revision_status"}
+              elif response.get("takenDown"):
+                  result = {"attempt": True, "status": "blocked_environment", "reason": "store_item_taken_down"}
+              elif response.get("warned"):
+                  result = {"attempt": True, "status": "blocked_environment", "reason": "store_policy_warning_requires_manual_action"}
+              elif published.get("state") in {"PENDING_REVIEW", "STAGED"}:
+                  result = {"attempt": True, "status": "blocked_environment", "reason": "store_review_pending"}
+              elif published.get("state") != "PUBLISHED":
+                  result = {"attempt": True, "status": "failed", "reason": "unexpected_post_publish_store_state"}
+              elif not exact_rows:
+                  result = {"attempt": True, "status": "failed", "reason": "provider_version_mismatch"}
+              elif versions != {sys.argv[2]}:
+                  result = {"attempt": True, "status": "failed", "reason": "mixed_published_versions"}
+              elif not all(row.get("deployPercentage") == 100 for row in exact_rows):
+                  result = {"attempt": True, "status": "blocked_environment", "reason": "store_rollout_not_fully_deployed"}
+              else:
+                  result = {"attempt": True, "status": "published", "reason": "verified_store_state"}
+          Path("chrome-result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          PY
+      - name: Record truthful Chrome evidence
+        if: always()
+        env:
+          CWS_ITEM_ID: ${{ vars.CWS_ITEM_ID }}
+          CHROME_INPUT_SHA256: ${{ needs.build-inputs.outputs.chrome_sha256 }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+        run: |
+          mkdir -p channel-evidence
+          read -r status reason < <(python3 -c 'import json; v=json.load(open("chrome-result.json")); print(v["status"], v["reason"])')
+          receipt=()
+          if [[ "$status" == published ]]; then
+            receipt=(--receipt "https://chromewebstore.google.com/detail/$CWS_ITEM_ID?version=$RELEASE_VERSION&input_sha256=$CHROME_INPUT_SHA256")
+          fi
+          python3 scripts/release_policy.py evidence \
+            --policy policy/release-policy.json \
+            --channel chrome_web_store --status "$status" --reason "$reason" \
+            "${receipt[@]}" --output channel-evidence/chrome_web_store.json
+      - name: Upload Chrome evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-chrome-web-store
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Fail only an actual Chrome channel failure
+        if: always()
+        run: |
+          [[ "$(python3 -c 'import json; print(json.load(open("chrome-result.json"))["status"])')" != failed ]]
+
+  firefox-amo:
+    name: Firefox AMO signing boundary
+    needs: [preflight, build-inputs]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: browser-release-policy
+          path: policy
+      - name: Download canonical unsigned input
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: browser-ci-only-firefox-unsigned-input-${{ needs.build-inputs.outputs.firefox_sha256 }}
+          path: firefox-input
+      - name: Classify AMO readiness without contacting Mozilla
+        id: readiness
+        env:
+          SELECTED: ${{ needs.preflight.outputs.firefox }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          AMO_CHANNEL: ${{ vars.AMO_CHANNEL }}
+        run: |
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          selected = os.environ["SELECTED"] == "true"
+          dry_run = os.environ["DRY_RUN"] == "true"
+          channel = os.environ.get("AMO_CHANNEL") or "unlisted"
+          if not selected:
+              status, reason, lookup = "skipped_not_configured", "not_selected", False
+          elif dry_run:
+              status, reason, lookup = "blocked_environment", "not_attempted_dry_run", False
+          elif channel not in {"listed", "unlisted"}:
+              status, reason, lookup = "failed", "invalid_amo_channel", False
+          elif channel == "listed":
+              status, reason, lookup = "blocked_environment", "amo_listed_review_required", False
+          else:
+              status, reason, lookup = "ready", "durable_replay_lookup_required", True
+          Path("firefox-result.json").write_text(json.dumps({
+              "attempt": False, "channel": channel, "reason": reason, "status": status,
+          }, sort_keys=True) + "\n")
+          with Path(sys.argv[1]).open("a", encoding="utf-8") as output:
+              output.write(f"lookup={str(lookup).lower()}\n")
+          PY
+      - name: Resolve a durable AMO replay before provider contact
+        id: replay
+        if: steps.readiness.outputs.lookup == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/amo_replay.py \
+            --api-url "$GITHUB_API_URL" \
+            --repository "$GITHUB_REPOSITORY" \
+            --version '${{ needs.preflight.outputs.version }}' \
+            --tag '${{ inputs.tag }}' \
+            --source-sha '${{ inputs.source_sha }}' \
+            --input-sha256 '${{ needs.build-inputs.outputs.firefox_sha256 }}' \
+            --output-dir amo-output \
+            --github-output "$GITHUB_OUTPUT" \
+            --result firefox-result.json
+      - name: Classify AMO provider readiness after a replay miss
+        id: provider-readiness
+        if: steps.replay.outputs.action == 'provider_lookup'
+        env:
+          AMO_PUBLISH_ENABLED: ${{ vars.AMO_PUBLISH_ENABLED }}
+          AMO_CREDENTIALS_CONFIGURED: ${{ secrets.AMO_JWT_ISSUER != '' && secrets.AMO_JWT_SECRET != '' }}
+        run: |
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          if os.environ.get("AMO_PUBLISH_ENABLED") != "true":
+              status, reason, lookup = "blocked_environment", "manual_enablement_required", False
+          elif os.environ.get("AMO_CREDENTIALS_CONFIGURED") != "true":
+              status, reason, lookup = "blocked_environment", "missing_provider_configuration", False
+          else:
+              status, reason, lookup = "ready", "provider_configured", True
+          Path("firefox-result.json").write_text(json.dumps({
+              "attempt": False, "channel": "unlisted", "reason": reason, "status": status,
+          }, sort_keys=True) + "\n")
+          with Path(sys.argv[1]).open("a", encoding="utf-8") as output:
+              output.write(f"lookup={str(lookup).lower()}\n")
+          PY
+      - name: Query the exact AMO version before creating it
+        id: provider
+        if: steps.provider-readiness.outputs.lookup == 'true'
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/amo_replay.py \
+            --provider-check \
+            --api-url "$GITHUB_API_URL" \
+            --repository "$GITHUB_REPOSITORY" \
+            --version '${{ needs.preflight.outputs.version }}' \
+            --tag '${{ inputs.tag }}' \
+            --source-sha '${{ inputs.source_sha }}' \
+            --input-sha256 '${{ needs.build-inputs.outputs.firefox_sha256 }}' \
+            --output-dir amo-output \
+            --github-output "$GITHUB_OUTPUT" \
+            --result firefox-result.json
+      - name: Set up Node after local AMO readiness passes
+        if: steps.provider.outputs.action == 'sign'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+      - name: Install integrity-locked AMO tooling without secrets
+        if: steps.provider.outputs.action == 'sign'
+        working-directory: release/browser-tooling
+        run: npm ci --ignore-scripts
+      - name: Validate committed Mozilla AMO production trust root without secrets
+        if: steps.replay.outputs.action == 'reuse' || steps.provider.outputs.action == 'reuse' || steps.provider.outputs.action == 'sign'
+        env:
+          MOZILLA_AMO_ROOT_DER_SHA256: c8a80e9afaef4e219b6fb5d7a71d0f101223bac5001ac28f9b0d43dc59a106db
+          MOZILLA_AMO_ROOT_SHA256: 69a98604f9c424d17ede053f68d8265272351aa35d23099b3a8384284309abf0
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="release/browser-tooling/mozilla-amo-production-root.pem"
+          echo "$MOZILLA_AMO_ROOT_SHA256  $root" | sha256sum --check --strict
+          openssl x509 -in "$root" -checkend 0 -noout
+          actual_der_sha256=$(openssl x509 -in "$root" -outform DER | sha256sum | cut -d' ' -f1)
+          [[ "$actual_der_sha256" == "$MOZILLA_AMO_ROOT_DER_SHA256" ]]
+      - name: Sign the exact tested input through AMO
+        id: sign
+        if: steps.provider.outputs.action == 'sign'
+        env:
+          AMO_CHANNEL: ${{ vars.AMO_CHANNEL }}
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+          AMO_TRUST_ROOT: ${{ github.workspace }}/release/browser-tooling/mozilla-amo-production-root.pem
+        shell: bash
+        run: |
+          set +e
+          mkdir -p amo-source amo-output
+          unzip -q firefox-input/firefox-biomem-unsigned.xpi -d amo-source
+          metadata=()
+          if [[ "${AMO_CHANNEL:-unlisted}" == listed ]]; then
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path("amo-metadata.json").write_text(json.dumps({
+              "categories": {"firefox": ["other"]},
+              "summary": {"en-US": "Local private memory for supported LLM web interfaces."},
+              "version": {"license": "MIT"},
+          }, indent=2, sort_keys=True) + "\n")
+          PY
+            metadata=(--amo-metadata amo-metadata.json)
+          fi
+          timeout --signal=TERM --kill-after=30s 10m \
+            "$GITHUB_WORKSPACE/release/browser-tooling/node_modules/.bin/web-ext" sign \
+            --source-dir amo-source --artifacts-dir amo-output \
+            --channel "${AMO_CHANNEL:-unlisted}" \
+            --api-key "$AMO_JWT_ISSUER" --api-secret "$AMO_JWT_SECRET" \
+            "${metadata[@]}" >amo-sign.log 2>&1
+          sign_status=$?
+          if [[ $sign_status -ne 0 ]]; then
+            AMO_SIGN_STATUS="$sign_status" python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          message = Path("amo-sign.log").read_text(errors="replace").lower()
+          ambiguous_identity = any(word in message for word in (
+              "409", "429", "500", "502", "503", "already exists", "previously uploaded",
+              "deleted", "conflict", "duplicate", "gateway", "rate limit", "service unavailable",
+              "timeout", "too many requests",
+          )) or os.environ.get("AMO_SIGN_STATUS") in {"124", "137"}
+          environmental = any(word in message for word in (
+              "auth", "credential", "jwt", "permission", "captcha", "review", "approval", "timeout",
+          ))
+          Path("firefox-result.json").write_text(json.dumps({
+              "attempt": True,
+              "channel": "unknown",
+              "status": "blocked_environment" if environmental or ambiguous_identity else "failed",
+              "reason": (
+                  "provider_version_identity_consumed_or_ambiguous" if ambiguous_identity
+                  else "provider_account_review_or_permission_required" if environmental
+                  else "amo_signing_failed"
+              ),
+          }, sort_keys=True) + "\n")
+          PY
+            cp firefox-result.json firefox-sign-failure.json
+            rm -rf -- amo-output
+            echo "recover=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "verify=true" >> "$GITHUB_OUTPUT"
+      - name: Recover the exact AMO version after an ambiguous signing result
+        id: recovery
+        if: steps.sign.outputs.recover == 'true'
+        env:
+          AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+          AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/amo_replay.py \
+            --provider-check --allow-sign false \
+            --api-url "$GITHUB_API_URL" \
+            --repository "$GITHUB_REPOSITORY" \
+            --version '${{ needs.preflight.outputs.version }}' \
+            --tag '${{ inputs.tag }}' \
+            --source-sha '${{ inputs.source_sha }}' \
+            --input-sha256 '${{ needs.build-inputs.outputs.firefox_sha256 }}' \
+            --output-dir amo-output \
+            --github-output "$GITHUB_OUTPUT" \
+            --result firefox-result.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          original = json.loads(Path("firefox-sign-failure.json").read_text())
+          recovered = json.loads(Path("firefox-result.json").read_text())
+          if (
+              recovered.get("reason") == "amo_version_visibility_unconfirmed"
+              and original.get("status") == "failed"
+          ):
+              Path("firefox-result.json").write_text(
+                  json.dumps(original, sort_keys=True) + "\n"
+              )
+          PY
+      - name: Verify a new or replayed AMO output identically
+        if: steps.replay.outputs.action == 'reuse' || steps.provider.outputs.action == 'reuse' || steps.recovery.outputs.action == 'reuse' || steps.sign.outputs.verify == 'true'
+        env:
+          AMO_TRUST_ROOT: ${{ github.workspace }}/release/browser-tooling/mozilla-amo-production-root.pem
+        shell: bash
+        run: |
+          set +e
+          python3 - '${{ needs.preflight.outputs.version }}' '${{ needs.build-inputs.outputs.firefox_sha256 }}' '${{ inputs.tag }}' '${{ inputs.source_sha }}' <<'PY'
+          import base64
+          import hashlib
+          import hmac
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import zipfile
+          import sys
+
+          def jar_sections(raw):
+              if b"\x00" in raw:
+                  raise ValueError("NUL in JAR manifest")
+              physical = raw.splitlines()
+              if any(len(line) > 72 for line in physical):
+                  raise ValueError("overlong physical JAR manifest line")
+              logical = []
+              for line in physical:
+                  if line.startswith(b" "):
+                      if not logical or logical[-1] == b"":
+                          raise ValueError("orphan JAR continuation")
+                      logical[-1] += line[1:]
+                  else:
+                      logical.append(line)
+              sections = []
+              current = {}
+              for line in [*logical, b""]:
+                  if not line:
+                      if current:
+                          sections.append(current)
+                          current = {}
+                      continue
+                  if b": " not in line:
+                      raise ValueError("malformed JAR manifest attribute")
+                  key, value = line.split(b": ", 1)
+                  key = key.decode("ascii")
+                  if key in current:
+                      raise ValueError("duplicate JAR manifest attribute")
+                  current[key] = value
+              return sections
+
+          def verify_jar_binding(manifest_bytes, signature_file_bytes, payload):
+              sf_sections = jar_sections(signature_file_bytes)
+              if len(sf_sections) != 1:
+                  raise ValueError("unexpected signature-file sections")
+              encoded_manifest_digest = sf_sections[0].get("SHA256-Digest-Manifest")
+              if encoded_manifest_digest is None:
+                  raise ValueError("missing signed manifest digest")
+              expected_manifest_digest = base64.b64decode(encoded_manifest_digest, validate=True)
+              if not hmac.compare_digest(expected_manifest_digest, hashlib.sha256(manifest_bytes).digest()):
+                  raise ValueError("signed manifest digest mismatch")
+              mf_sections = jar_sections(manifest_bytes)
+              if len(mf_sections) < 2 or mf_sections[0].get("Manifest-Version") != b"1.0":
+                  raise ValueError("invalid signed manifest header")
+              digests = {}
+              for section in mf_sections[1:]:
+                  if set(("Name", "SHA256-Digest")) - set(section):
+                      raise ValueError("incomplete signed entry section")
+                  name = section["Name"].decode("utf-8")
+                  if name in digests:
+                      raise ValueError("duplicate signed entry")
+                  digests[name] = base64.b64decode(section["SHA256-Digest"], validate=True)
+              if set(digests) != set(payload):
+                  raise ValueError("unsigned or missing archive entry")
+              for name, data in payload.items():
+                  if not hmac.compare_digest(digests[name], hashlib.sha256(data).digest()):
+                      raise ValueError("signed entry digest mismatch")
+
+          def signer_cn_matches(subject_output, expected):
+              common_names = [
+                  line.strip()[3:]
+                  for line in subject_output.splitlines()
+                  if line.strip().startswith("CN=")
+              ]
+              return common_names == [expected]
+
+          outputs = list(Path("amo-output").glob("*.xpi"))
+          channel = json.loads(Path("firefox-result.json").read_text())["channel"]
+          if len(outputs) != 1:
+              status = "blocked_environment" if channel == "listed" else "failed"
+              reason = "amo_review_pending" if channel == "listed" else "missing_signed_amo_output"
+              Path("firefox-result.json").write_text(json.dumps({
+                  "attempt": True, "channel": channel, "status": status, "reason": reason,
+              }, sort_keys=True) + "\n")
+              raise SystemExit(0)
+          signed = outputs[0]
+          with zipfile.ZipFile(signed) as archive:
+              infos = archive.infolist()
+              if not infos or len(infos) > 512:
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "invalid_signed_xpi_member_count",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              if len(archive.namelist()) != len(set(archive.namelist())):
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "duplicate_signed_zip_entries",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              expanded_size = 0
+              for info in infos:
+                  path = __import__("pathlib").PurePosixPath(info.filename)
+                  if (
+                      info.filename.startswith("/")
+                      or "\\" in info.filename
+                      or ".." in path.parts
+                      or __import__("stat").S_ISLNK(info.external_attr >> 16)
+                  ):
+                      Path("firefox-result.json").write_text(json.dumps({
+                          "attempt": True, "channel": channel, "status": "failed",
+                          "reason": "unsafe_signed_xpi_entry",
+                      }, sort_keys=True) + "\n")
+                      raise SystemExit(0)
+                  if info.file_size < 0 or info.file_size > 20 * 1024 * 1024:
+                      Path("firefox-result.json").write_text(json.dumps({
+                          "attempt": True, "channel": channel, "status": "failed",
+                          "reason": "oversized_signed_xpi_entry",
+                      }, sort_keys=True) + "\n")
+                      raise SystemExit(0)
+                  expanded_size += info.file_size
+                  if expanded_size > 50 * 1024 * 1024:
+                      Path("firefox-result.json").write_text(json.dumps({
+                          "attempt": True, "channel": channel, "status": "failed",
+                          "reason": "oversized_signed_xpi",
+                      }, sort_keys=True) + "\n")
+                      raise SystemExit(0)
+              canonical_names = {name.upper(): name for name in archive.namelist()}
+              if len(canonical_names) != len(archive.namelist()):
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "case_colliding_signed_zip_entries",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              names = set(canonical_names)
+              required = {"META-INF/MANIFEST.MF", "META-INF/MOZILLA.SF", "META-INF/MOZILLA.RSA"}
+              if not required.issubset(names):
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "invalid_amo_signature_metadata",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              metadata_names = {name for name in names if name.startswith("META-INF/")}
+              optional_cose = {"META-INF/COSE.MANIFEST", "META-INF/COSE.SIG"}
+              present_cose = metadata_names & optional_cose
+              if present_cose not in (set(), optional_cose) or metadata_names != required | present_cose:
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "unexpected_amo_signature_metadata",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              manifest = json.loads(archive.read("manifest.json"))
+              signed_payload = {
+                  name: archive.read(name)
+                  for name in archive.namelist()
+                  if not name.endswith("/") and not name.upper().startswith("META-INF/")
+              }
+              jar_bound_payload = dict(signed_payload)
+              for canonical_name in present_cose:
+                  original_name = canonical_names[canonical_name]
+                  jar_bound_payload[original_name] = archive.read(original_name)
+              with tempfile.TemporaryDirectory() as temporary:
+                  temporary_path = Path(temporary)
+                  signature = temporary_path / "mozilla.rsa"
+                  signature_file = temporary_path / "mozilla.sf"
+                  manifest_file = temporary_path / "manifest.mf"
+                  signer_file = temporary_path / "signer.pem"
+                  signature.write_bytes(archive.read(canonical_names["META-INF/MOZILLA.RSA"]))
+                  signature_file.write_bytes(archive.read(canonical_names["META-INF/MOZILLA.SF"]))
+                  manifest_file.write_bytes(archive.read(canonical_names["META-INF/MANIFEST.MF"]))
+                  verification = subprocess.run(
+                      ["openssl", "cms", "-verify", "-binary", "-inform", "DER",
+                       "-in", str(signature), "-content", str(signature_file),
+                       "-CAfile", os.environ["AMO_TRUST_ROOT"], "-no-CApath", "-no-CAstore",
+                       "-purpose", "any", "-verify_depth", "2", "-signer", str(signer_file),
+                       "-out", os.devnull],
+                      capture_output=True,
+                  )
+                  cryptographically_valid = verification.returncode == 0
+                  signer_identity_valid = False
+                  if cryptographically_valid and signer_file.read_text().count("-----BEGIN CERTIFICATE-----") == 1:
+                      subject = subprocess.run(
+                          ["openssl", "x509", "-in", str(signer_file), "-noout",
+                           "-subject", "-nameopt", "sep_multiline,utf8"],
+                          capture_output=True, text=True,
+                      )
+                      signer_identity_valid = (
+                          subject.returncode == 0
+                          and signer_cn_matches(subject.stdout, "biomem@bleedingdev.github.io")
+                      )
+                  try:
+                      verify_jar_binding(
+                          manifest_file.read_bytes(), signature_file.read_bytes(), jar_bound_payload,
+                      )
+                  except Exception:
+                      jar_binding_valid = False
+                  else:
+                      jar_binding_valid = True
+          with zipfile.ZipFile("firefox-input/firefox-biomem-unsigned.xpi") as unsigned:
+              if len(unsigned.namelist()) != len(set(unsigned.namelist())):
+                  Path("firefox-result.json").write_text(json.dumps({
+                      "attempt": True, "channel": channel, "status": "failed",
+                      "reason": "duplicate_unsigned_zip_entries",
+                  }, sort_keys=True) + "\n")
+                  raise SystemExit(0)
+              unsigned_payload = {
+                  name: unsigned.read(name)
+                  for name in unsigned.namelist()
+                  if not name.endswith("/") and not name.upper().startswith("META-INF/")
+              }
+          payload_drift = signed_payload != unsigned_payload
+          if payload_drift:
+              signed_names = set(signed_payload)
+              unsigned_names = set(unsigned_payload)
+              changed_names = sorted(
+                  name for name in signed_names & unsigned_names
+                  if signed_payload[name] != unsigned_payload[name]
+              )
+              print("AMO payload drift: " + json.dumps({
+                  "added_by_provider": sorted(signed_names - unsigned_names),
+                  "changed": {
+                      name: {
+                          "provider_sha256": hashlib.sha256(signed_payload[name]).hexdigest(),
+                          "unsigned_sha256": hashlib.sha256(unsigned_payload[name]).hexdigest(),
+                      }
+                      for name in changed_names
+                  },
+                  "missing_from_provider": sorted(unsigned_names - signed_names),
+              }, sort_keys=True))
+          actual_id = manifest.get("browser_specific_settings", {}).get("gecko", {}).get("id")
+          if not cryptographically_valid:
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "invalid_amo_cryptographic_signature"}
+          elif not signer_identity_valid:
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "invalid_amo_signer_identity"}
+          elif not jar_binding_valid:
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "invalid_amo_signature_binding"}
+          elif payload_drift:
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "amo_payload_drift"}
+          elif actual_id != "biomem@bleedingdev.github.io":
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "provider_identity_mismatch"}
+          elif manifest.get("version") != sys.argv[1]:
+              result = {"attempt": True, "channel": channel, "status": "failed", "reason": "provider_version_mismatch"}
+          elif channel == "listed":
+              result = {"attempt": True, "channel": channel, "status": "blocked_environment", "reason": "amo_review_pending"}
+          else:
+              result = {"attempt": True, "channel": channel, "status": "blocked_environment", "reason": "signed_output_awaiting_release_attachment"}
+              ready = Path("firefox-ready")
+              ready.mkdir()
+              target = ready / f"firefox-biomem-{sys.argv[1]}-amo-signed.xpi"
+              signed.replace(target)
+              (ready / "verified-firefox-amo.json").write_text(json.dumps({
+                  "filename": target.name,
+                  "input_sha256": sys.argv[2],
+                  "signed_sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
+                  "size": target.stat().st_size,
+                  "source_sha": sys.argv[4],
+                  "tag": sys.argv[3],
+                  "version": sys.argv[1],
+              }, sort_keys=True) + "\n")
+          Path("firefox-result.json").write_text(json.dumps(result, sort_keys=True) + "\n")
+          PY
+          verification_status=$?
+          if [[ $verification_status -ne 0 ]]; then
+            rm -rf -- firefox-ready amo-output
+            python3 - <<'PY'
+          import json
+          from pathlib import Path
+          Path("firefox-result.json").write_text(json.dumps({
+              "attempt": True,
+              "channel": "unlisted",
+              "status": "failed",
+              "reason": "malformed_or_unverifiable_amo_signed_output",
+          }, sort_keys=True) + "\n")
+          PY
+          fi
+      - name: Record truthful Firefox evidence
+        if: always()
+        run: |
+          mkdir -p channel-evidence
+          read -r status reason < <(python3 -c 'import json; v=json.load(open("firefox-result.json")); print(v["status"], v["reason"])')
+          python3 scripts/release_policy.py evidence \
+            --policy policy/release-policy.json \
+            --channel firefox_amo --status "$status" --reason "$reason" \
+            --output channel-evidence/firefox_amo.json
+      - name: Retain the newly signed AMO result as the single durable replay identity
+        if: (steps.sign.outputs.verify == 'true' || ((steps.provider.outputs.action == 'reuse' || steps.recovery.outputs.action == 'reuse') && steps.replay.outputs.reason == 'no_durable_amo_replay_found')) && hashFiles('firefox-ready/*.xpi') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.replay.outputs.artifact_name }}
+          path: firefox-ready/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Create exact current-run Firefox handoff envelope
+        if: always()
+        env:
+          FIREFOX_INPUT_SHA256: ${{ needs.build-inputs.outputs.firefox_sha256 }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          RUN_ID: ${{ github.run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          mkdir firefox-handoff
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+
+          result = json.loads(Path("firefox-result.json").read_text())
+          outputs = list(Path("firefox-ready").glob("*.xpi")) if Path("firefox-ready").exists() else []
+          ready = len(outputs) == 1 and Path("firefox-ready/verified-firefox-amo.json").is_file()
+          if outputs and not ready:
+              raise SystemExit("incomplete verified Firefox handoff")
+          envelope = {
+              "filename": None,
+              "input_sha256": os.environ["FIREFOX_INPUT_SHA256"],
+              "ready": ready,
+              "reason": result["reason"],
+              "run_attempt": int(os.environ["RUN_ATTEMPT"]),
+              "run_id": int(os.environ["RUN_ID"]),
+              "sha256": None,
+              "size": None,
+              "source_sha": os.environ["SOURCE_SHA"],
+              "status": result["status"],
+              "tag": os.environ["RELEASE_TAG"],
+              "version": os.environ["RELEASE_VERSION"],
+          }
+          if ready:
+              source = outputs[0]
+              verified = json.loads(Path("firefox-ready/verified-firefox-amo.json").read_text())
+              expected = {
+                  "filename": source.name,
+                  "input_sha256": os.environ["FIREFOX_INPUT_SHA256"],
+                  "signed_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                  "size": source.stat().st_size,
+                  "source_sha": os.environ["SOURCE_SHA"],
+                  "tag": os.environ["RELEASE_TAG"],
+                  "version": os.environ["RELEASE_VERSION"],
+              }
+              if verified != expected:
+                  raise SystemExit("verified Firefox metadata drift")
+              shutil.copyfile(source, Path("firefox-handoff") / source.name)
+              shutil.copyfile(
+                  "firefox-ready/verified-firefox-amo.json",
+                  "firefox-handoff/verified-firefox-amo.json",
+              )
+              envelope.update({
+                  "filename": source.name,
+                  "sha256": expected["signed_sha256"],
+                  "size": expected["size"],
+              })
+          Path("firefox-handoff/firefox-handoff.json").write_text(
+              json.dumps(envelope, sort_keys=True) + "\n"
+          )
+          PY
+      - name: Upload exact current-run Firefox handoff envelope
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: browser-firefox-current-${{ github.run_id }}-${{ github.run_attempt }}
+          path: firefox-handoff/
+          if-no-files-found: error
+          retention-days: 2
+      - name: Upload Firefox evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-firefox-amo
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Fail only an actual Firefox channel failure
+        if: always()
+        run: |
+          [[ "$(python3 -c 'import json; print(json.load(open("firefox-result.json"))["status"])')" != failed ]]
+
+  safari-not-selected-or-dry-run:
+    name: Classify unavailable Safari public channel
+    needs: preflight
+    if: needs.preflight.outputs.safari != 'true' || inputs.dry_run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: browser-release-policy
+          path: policy
+      - name: Record Safari classification without building a public artifact
+        env:
+          SELECTED: ${{ needs.preflight.outputs.safari }}
+        run: |
+          mkdir -p channel-evidence
+          if [[ "$SELECTED" == true ]]; then
+            status=blocked_environment
+            reason=not_attempted_dry_run
+          else
+            status=skipped_not_configured
+            reason=not_selected
+          fi
+          python3 scripts/release_policy.py evidence \
+            --policy policy/release-policy.json --channel safari_public \
+            --status "$status" --reason "$reason" \
+            --output channel-evidence/safari_public.json
+      - name: Upload Safari classification
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-safari-public
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  safari-public:
+    name: Optional Apple-signed Safari boundary
+    needs: preflight
+    if: needs.preflight.outputs.safari == 'true' && !inputs.dry_run
+    uses: ./.github/workflows/release-sign-apple.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      dry_run: ${{ inputs.dry_run }}
+      channel: safari_public
+      provider_credentials_configured: >-
+        ${{ inputs.apple_common_credentials_configured ||
+            vars.APPLE_COMMON_CREDENTIALS_CONFIGURED == 'true' }}
+      channel_credentials_configured: >-
+        ${{ inputs.apple_safari_credentials_configured ||
+            vars.APPLE_SAFARI_CREDENTIALS_CONFIGURED == 'true' }}

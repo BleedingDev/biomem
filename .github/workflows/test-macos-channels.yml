@@ -1,0 +1,244 @@
+name: Test zero-cost macOS channels
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/test-macos-channels.yml'
+      - 'packaging/homebrew/**'
+      - 'scripts/release/generate_homebrew_formula.py'
+      - 'scripts/release/canonical_artifacts.py'
+      - 'scripts/release_policy.py'
+      - 'release/release-policy.json'
+      - 'tests/release/test_macos_channels.py'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/test-macos-channels.yml'
+      - 'packaging/homebrew/**'
+      - 'scripts/release/generate_homebrew_formula.py'
+      - 'scripts/release/canonical_artifacts.py'
+      - 'scripts/release_policy.py'
+      - 'release/release-policy.json'
+      - 'tests/release/test_macos_channels.py'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing immutable GitHub Release tag to test (for example v0.0.2)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-channels-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  metadata-contract:
+    name: Deterministic formula contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Test generator, checksum rejection, and workflow contract
+        run: python -m unittest -v tests.release.test_macos_channels
+
+  released-archive-smoke:
+    name: Released archive (${{ matrix.target }})
+    if: github.event_name == 'workflow_dispatch'
+    needs: metadata-contract
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: macos-arm64
+            machine: arm64
+          - runner: macos-15-intel
+            target: macos-x86_64
+            machine: x86_64
+    env:
+      HOMEBREW_NO_ANALYTICS: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_ENV_HINTS: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_TARGET: ${{ matrix.target }}
+      EXPECTED_MACHINE: ${{ matrix.machine }}
+    steps:
+      - name: Checkout the immutable release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_tag }}
+          persist-credentials: false
+      - name: Require a matching clean runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          actual="$(uname -m)"
+          if [[ "$actual" != "$EXPECTED_MACHINE" ]]; then
+            echo "BLOCKED_ENVIRONMENT: expected $EXPECTED_MACHINE runner, got $actual" >&2
+            exit 1
+          fi
+          for command in brew codesign gh; do
+            if ! command -v "$command" >/dev/null; then
+              echo "BLOCKED_ENVIRONMENT: required runner command is missing: $command" >&2
+              exit 1
+            fi
+          done
+      - name: Resolve the exact release artifact contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release_policy.py policy \
+            --tag "$RELEASE_TAG" \
+            --dry-run false \
+            --channels none \
+            --output release-policy.json
+      - name: Download only published canonical metadata and matching archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir release-assets
+          archive="biomem-${RELEASE_TARGET}.tar.gz"
+          if ! gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets \
+            --pattern "$archive" \
+            --pattern SHA256SUMS.txt; then
+            echo "BLOCKED_ENVIRONMENT: immutable release assets are unavailable or unreadable" >&2
+            exit 1
+          fi
+          [[ -f "release-assets/$archive" && -f release-assets/SHA256SUMS.txt ]]
+      - name: Generate the checksum-pinned formula
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/release/generate_homebrew_formula.py \
+            --policy release-policy.json \
+            --checksums release-assets/SHA256SUMS.txt \
+            --repository "$GITHUB_REPOSITORY" \
+            --output generated/Formula/biomem.rb
+      - name: Verify checksum, archive allowlist, architecture, and ad-hoc signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="biomem-${RELEASE_TARGET}.tar.gz"
+          checksum_line="$(grep -E "^[0-9a-f]{64}  ${archive}$" release-assets/SHA256SUMS.txt || true)"
+          [[ "$(printf '%s\n' "$checksum_line" | grep -c .)" == 1 ]]
+          printf '%s\n' "$checksum_line" > release-assets/matching-SHA256SUM.txt
+          (cd release-assets && shasum -a 256 -c matching-SHA256SUM.txt)
+          python3 - "$archive" "$RELEASE_TARGET" "$RELEASE_TAG" <<'PY'
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "scripts/release")
+          import canonical_artifacts
+
+          archive, target, tag = sys.argv[1:]
+          canonical_artifacts.verify_archive(
+              Path("release-assets") / archive,
+              target,
+              tag.removeprefix("v"),
+              Path("extracted"),
+          )
+          PY
+          file extracted/biomem | grep -F "$EXPECTED_MACHINE"
+          signature="$(codesign -dvv extracted/biomem 2>&1)"
+          printf '%s\n' "$signature"
+          codesign --verify --strict extracted/biomem
+          grep -F 'Signature=adhoc' <<<"$signature"
+          ./extracted/biomem --version | grep -F "v${RELEASE_TAG#v}"
+      - name: Exercise temporary tap install, upgrade, test, and uninstall
+        shell: bash
+        run: |
+          set -euo pipefail
+          tap="biomem-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/channel"
+          formula="$tap/biomem"
+          tap_dir="$(brew --repository)/Library/Taps/${tap%%/*}/homebrew-${tap##*/}"
+          cleanup() {
+            brew uninstall --force "$formula" >/dev/null 2>&1 || true
+            brew untap "$tap" >/dev/null 2>&1 || true
+            rm -f "$sentinel"
+            rmdir "$(dirname "$sentinel")" >/dev/null 2>&1 || true
+          }
+          sentinel="$HOME/Library/Application Support/biomem/ci-memory-sentinel"
+          trap cleanup EXIT
+          brew tap-new --no-git "$tap"
+
+          mkdir -p "$(dirname "$sentinel")"
+          printf 'must-survive-brew-uninstall\n' > "$sentinel"
+          before="$(shasum -a 256 "$sentinel")"
+
+          sed -E 's/sha256 "[0-9a-f]{64}"/sha256 "0000000000000000000000000000000000000000000000000000000000000000"/' \
+            generated/Formula/biomem.rb > "$tap_dir/Formula/biomem.rb"
+          if brew fetch --force "$formula"; then
+            echo 'A formula with the wrong checksum unexpectedly fetched successfully.' >&2
+            exit 1
+          fi
+
+          old_fixture="$RUNNER_TEMP/biomem-0.0.0"
+          mkdir "$old_fixture"
+          cat > "$old_fixture/biomem" <<'SH'
+          #!/bin/sh
+          printf 'biomem v0.0.0\n'
+          SH
+          chmod 755 "$old_fixture/biomem"
+          cp extracted/LICENSE extracted/VERIFY.txt "$old_fixture/"
+          printf '0.0.0\n' > "$old_fixture/VERSION"
+          old_archive="$RUNNER_TEMP/biomem-0.0.0.tar.gz"
+          tar -czf "$old_archive" -C "$old_fixture" biomem LICENSE VERSION VERIFY.txt
+          old_sha="$(shasum -a 256 "$old_archive" | awk '{print $1}')"
+          cat > "$tap_dir/Formula/biomem.rb" <<RUBY
+          class Biomem < Formula
+            desc "Local memory engine for LLM conversations"
+            homepage "https://github.com/$GITHUB_REPOSITORY"
+            url "file://$old_archive"
+            version "0.0.0"
+            sha256 "$old_sha"
+            license "MIT"
+            depends_on :macos
+            def install
+              bin.install "biomem"
+              prefix.install "LICENSE", "VERSION", "VERIFY.txt"
+            end
+          end
+          RUBY
+          brew install --formula "$formula"
+          biomem --version | grep -Fx 'biomem v0.0.0'
+          old_keg="$(brew --prefix "$formula")"
+          old_target="$old_keg/bin/biomem"
+          [[ -x "$old_target" ]]
+          old_digest="$(shasum -a 256 "$old_target" | awk '{print $1}')"
+
+          cp generated/Formula/biomem.rb "$tap_dir/Formula/biomem.rb"
+          brew upgrade --formula "$formula"
+          biomem --version | grep -F "v${RELEASE_TAG#v}"
+          if biomem --version | grep -Fq 'v0.0.0'; then
+            echo 'Upgrade left the observable old fixture installed.' >&2
+            exit 1
+          fi
+          new_keg="$(brew --prefix "$formula")"
+          new_target="$new_keg/bin/biomem"
+          [[ -x "$new_target" ]]
+          new_digest="$(shasum -a 256 "$new_target" | awk '{print $1}')"
+          [[ "$old_keg" != "$new_keg" ]]
+          [[ "$old_target" != "$new_target" ]]
+          [[ "$old_digest" != "$new_digest" ]]
+          brew test "$formula"
+          brew uninstall --formula "$formula"
+
+          after="$(shasum -a 256 "$sentinel")"
+          [[ "$before" == "$after" ]]

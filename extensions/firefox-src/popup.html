@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>biomem Memory</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup">
+    <div class="popup-header">
+      <img class="popup-logo" src="assets/icon128.png" alt="biomem">
+      <div class="popup-title">biomem Memory</div>
+    </div>
+
+    <div class="popup-status" id="popup-status">
+      <span class="popup-dot pending" id="popup-dot"></span>
+      <span class="popup-state-text" id="popup-state-text">Checking…</span>
+    </div>
+
+    <div class="popup-detail" id="popup-detail">
+      <div id="popup-detail-text"></div>
+      <a id="popup-download" class="popup-download-link" href="https://github.com/BleedingDev/biomem" target="_blank" rel="noopener" hidden>
+        Download biomem Memory
+      </a>
+    </div>
+
+    <div class="popup-actions">
+      <button class="popup-btn popup-btn-secondary" id="popup-open-options" type="button">Open full settings</button>
+      <button class="popup-btn popup-btn-link" id="popup-open-wizard" type="button">Run setup wizard</button>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

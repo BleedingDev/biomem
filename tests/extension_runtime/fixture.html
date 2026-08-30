@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local ChatGPT-like biomem fixture</title>
+</head>
+<body>
+  <main id="conversation-main">
+    <section id="conversation" aria-label="Synthetic conversation"></section>
+    <form id="composer-form">
+      <div id="prompt-textarea" class="ProseMirror" contenteditable="true" role="textbox"></div>
+      <button data-testid="send-button" aria-label="Send prompt" type="submit">Send</button>
+    </form>
+  </main>
+
+  <script src="/tests/extension_runtime/fixture.js"></script>
+  <script src="/extensions/chrome-src/content/bdbm-client.js"></script>
+  <script src="/extensions/chrome-src/content/prompt-builder.js"></script>
+  <script src="/extensions/chrome-src/content/common.js"></script>
+  <script src="/extensions/chrome-src/content/site-chatgpt.js"></script>
+</body>
+</html>

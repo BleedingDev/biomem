@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>biomem plugin Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <img class="logo" src="assets/icon128.png" alt="biomem">
+      <h1 id="page-title">biomem Hippocampus plugin Settings</h1>
+    </div>
+
+    <div id="wizard-view" hidden>
+      <div class="stepper" role="tablist" aria-label="Setup steps">
+        <div class="step" data-step="1">
+          <div class="step-circle">1</div>
+          <div class="step-label">biomem Memory</div>
+        </div>
+        <div class="step-divider"></div>
+        <div class="step" data-step="2">
+          <div class="step-circle">2</div>
+          <div class="step-label">Sites</div>
+        </div>
+      </div>
+
+      <section class="wizard-step" data-step="1" hidden>
+        <h2>Step 1 — Detect biomem memory software</h2>
+        <p class="note">
+          The plugin connects only to the biomem Memory desktop application running on this computer.
+          We will probe <code>http://127.0.0.1:8766/api/health</code>.
+        </p>
+        <div class="status-line" id="conn-status">
+          <span class="status-icon" id="conn-icon">…</span>
+          <span id="conn-text">Checking connection…</span>
+        </div>
+        <div class="status-help" id="conn-help" hidden>
+          Start the local biomem Memory application, then click <strong>Try again</strong>.
+          You can download it from
+          <a href="https://github.com/BleedingDev/biomem" target="_blank" rel="noopener">github.com/BleedingDev/biomem</a>.
+        </div>
+        <div class="wizard-actions">
+          <button class="btn-secondary" id="conn-retry" type="button">Try again</button>
+          <button class="btn-primary" id="conn-next" type="button" disabled>Continue</button>
+          <button class="btn-link" id="conn-skip" type="button">Skip for now</button>
+        </div>
+      </section>
+
+      <section class="wizard-step" data-step="2" hidden>
+        <h2>Step 2 — Choose where the plugin should run</h2>
+        <p class="note">
+          Grant access only to the LLM sites where you want local memory enrichment.
+          You can change these permissions later.
+        </p>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="wiz-site-gemini"> Gemini</label>
+          <button class="site-btn" id="wiz-perm-gemini" type="button">Grant access</button>
+          <span class="site-status" id="wiz-perm-gemini-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="wiz-site-chatgpt"> ChatGPT</label>
+          <button class="site-btn" id="wiz-perm-chatgpt" type="button">Grant access</button>
+          <span class="site-status" id="wiz-perm-chatgpt-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="wiz-site-claude"> Claude</label>
+          <button class="site-btn" id="wiz-perm-claude" type="button">Grant access</button>
+          <span class="site-status" id="wiz-perm-claude-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="wiz-site-perplexity"> Perplexity</label>
+          <button class="site-btn" id="wiz-perm-perplexity" type="button">Grant access</button>
+          <span class="site-status" id="wiz-perm-perplexity-status">Access: unknown</span>
+        </div>
+        <div class="wizard-actions">
+          <button class="btn-secondary" id="sites-back" type="button">Back</button>
+          <button class="btn-primary" id="sites-finish" type="button">Finish setup</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="options-view">
+      <section>
+        <h2>Local biomem connection</h2>
+        <label>
+          biomem WS URL
+          <input type="text" id="bdbm-ws-url" placeholder="ws://127.0.0.1:8765">
+        </label>
+        <label>
+          biomem HTTP URL
+          <input type="text" id="bdbm-http-url" placeholder="http://127.0.0.1:8766/api">
+        </label>
+      </section>
+
+      <section>
+        <h2>Memory Settings</h2>
+        <label class="row">
+          <input type="checkbox" id="memory-enabled">
+          Enable memory by default
+        </label>
+      </section>
+
+      <section>
+        <h2>Sites</h2>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="site-gemini"> Gemini</label>
+          <button class="site-btn" id="perm-gemini" type="button">Grant access</button>
+          <span class="site-status" id="perm-gemini-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="site-chatgpt"> ChatGPT</label>
+          <button class="site-btn" id="perm-chatgpt" type="button">Grant access</button>
+          <span class="site-status" id="perm-chatgpt-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="site-claude"> Claude</label>
+          <button class="site-btn" id="perm-claude" type="button">Grant access</button>
+          <span class="site-status" id="perm-claude-status">Access: unknown</span>
+        </div>
+        <div class="site-row">
+          <label class="row"><input type="checkbox" id="site-perplexity"> Perplexity</label>
+          <button class="site-btn" id="perm-perplexity" type="button">Grant access</button>
+          <span class="site-status" id="perm-perplexity-status">Access: unknown</span>
+        </div>
+        <div class="note">
+          Site access is requested explicitly per app. After granting access, refresh the target tab.
+        </div>
+      </section>
+
+      <div class="actions">
+        <button id="save-btn">Save</button>
+        <button class="btn-link" id="open-wizard-btn" type="button">Run setup wizard</button>
+        <span id="status" class="status"></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

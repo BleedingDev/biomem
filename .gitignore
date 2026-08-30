@@ -1,0 +1,26 @@
+__pycache__/
+*.pyc
+.venv*/
+venv/
+.codex/
+.pytest_cache/
+.ruff_cache/
+dist/
+build/
+*.egg-info/
+.bdbm_data/
+memory_state.*
+backups/
+*.so
+.venv-mac/
+
+# distribution & browser-plugin artifacts
+*.exe
+*.tar.gz
+*.crx
+*.xpi
+
+# Xcode / Safari plugin
+Dist/
+xcuserdata/
+*.xcuserstate

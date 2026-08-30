@@ -1,0 +1,434 @@
+name: Reusable release core
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+      source_sha:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      channels:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.13'
+
+jobs:
+  verify:
+    name: Verify source and policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      targets: ${{ steps.policy.outputs.targets }}
+      version: ${{ steps.policy.outputs.version }}
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: src/pyproject.toml
+      - name: Resolve canonical release policy
+        id: policy
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          SELECTED_CHANNELS: ${{ inputs.channels }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$SOURCE_SHA" ]]
+          python scripts/release_policy.py policy \
+            --tag "$RELEASE_TAG" \
+            --dry-run "$RELEASE_DRY_RUN" \
+            --channels "$SELECTED_CHANNELS" \
+            --output release-policy.json \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Require tag-bound Actions context for a real release
+        env:
+          RELEASE_DRY_RUN: ${{ inputs.dry_run }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_DRY_RUN" != "true" ]]; then
+            [[ "$WORKFLOW_REF" == "refs/tags/$RELEASE_TAG" ]]
+            [[ "$WORKFLOW_SHA" == "$SOURCE_SHA" ]]
+          fi
+      - name: Verify tag and package versions agree
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python3 - "$RELEASE_TAG" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          import tomllib
+          expected = sys.argv[1].removeprefix("v")
+          versions = {
+              "python": tomllib.loads(Path("src/pyproject.toml").read_text())["project"]["version"],
+              "chrome": json.loads(Path("extensions/chrome-src/manifest.json").read_text())["version"],
+              "firefox": json.loads(Path("extensions/firefox-src/manifest.json").read_text())["version"],
+              "safari": json.loads(Path("extensions/safari-src/manifest.json").read_text())["version"],
+          }
+          mismatches = {name: value for name, value in versions.items() if value != expected}
+          if mismatches:
+              raise SystemExit(f"tag version {expected} does not match: {mismatches}")
+          PY
+      - name: Install Linux GUI runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libegl1 libgl1 libxkbcommon-x11-0 libxcb-cursor0
+      - name: Install test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python - <<'PY'
+          from pathlib import Path
+          import tomllib
+
+          project = tomllib.loads(Path("src/pyproject.toml").read_text())["project"]
+          dependencies = project["dependencies"]
+          torch_requirements = [item for item in dependencies if item.startswith("torch")]
+          if torch_requirements != ["torch>=2.1"]:
+              raise SystemExit(f"unexpected project torch requirements: {torch_requirements}")
+          requirements = [item for item in dependencies if item not in torch_requirements]
+          requirements.extend(project["optional-dependencies"]["all"])
+          requirements.append("pytest")
+          Path("release-test-requirements.txt").write_text(
+              "\n".join(requirements) + "\n", encoding="utf-8"
+          )
+          Path("release-test-constraints.txt").write_text(
+              "torch==2.12.1+cpu\n", encoding="utf-8"
+          )
+          PY
+          python -m pip install 'torch==2.12.1+cpu' \
+            --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install \
+            --constraint release-test-constraints.txt \
+            --requirement release-test-requirements.txt
+          python -m pip install --no-deps -e src
+          python -m pip check
+          python - <<'PY'
+          import torch
+          if torch.__version__ != "2.12.1+cpu" or torch.version.cuda is not None:
+              raise SystemExit(
+                  f"test environment has unexpected torch {torch.__version__} "
+                  f"with CUDA {torch.version.cuda}"
+              )
+          PY
+      - name: Run full tests and extension validation
+        run: |
+          python -m pytest -q
+          ./scripts/build_extensions.sh --validate-only
+      - name: Upload resolved policy
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-policy
+          path: release-policy.json
+          if-no-files-found: error
+          retention-days: 14
+
+  python-distributions:
+    name: Build Python distributions once
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Build wheel and explicit source distribution
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build src --outdir release-assets
+      - name: Validate exact distribution names and metadata
+        env:
+          RELEASE_VERSION: ${{ needs.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=(
+            "biomem_memory-${RELEASE_VERSION}-py3-none-any.whl"
+            "biomem_memory-${RELEASE_VERSION}.tar.gz"
+          )
+          mapfile -t actual < <(find release-assets -maxdepth 1 -type f -exec basename {} \; | LC_ALL=C sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | LC_ALL=C sort)
+          [[ "${actual[*]}" == "${wanted[*]}" ]]
+          python -m twine check release-assets/*
+      - name: Record producer digests
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          python scripts/release/canonical_artifacts.py record-digest \
+            --producer python \
+            --source-sha "$SOURCE_SHA" \
+            --output producer-digest-python.json \
+            release-assets/*
+      - name: Upload unchanged Python distributions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-core-python
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Python producer digests
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: producer-digest-python
+          path: producer-digest-python.json
+          if-no-files-found: error
+          retention-days: 14
+
+  binaries:
+    name: Canonical archive (${{ matrix.target }})
+    needs: verify
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.verify.outputs.targets) }}
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.target == 'macos-x86_64' && '3.12' || env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: src/pyproject.toml
+      - name: Install build dependencies
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip setuptools wheel
+          python - "$RELEASE_TARGET" <<'PY'
+          from pathlib import Path
+          import sys
+          import tomllib
+
+          target = sys.argv[1]
+          project = tomllib.loads(Path("src/pyproject.toml").read_text())["project"]
+          dependencies = project["dependencies"]
+          torch_requirements = [item for item in dependencies if item.startswith("torch")]
+          if torch_requirements != ["torch>=2.1"]:
+              raise SystemExit(f"unexpected project torch requirements: {torch_requirements}")
+          requirements = [item for item in dependencies if item not in torch_requirements]
+          requirements.extend(project["optional-dependencies"]["all"])
+          requirements.append("pyinstaller==6.22.2")
+          Path("release-build-requirements.txt").write_text(
+              "\n".join(requirements) + "\n", encoding="utf-8"
+          )
+          torch_version = "2.2.2" if target == "macos-x86_64" else "2.12.1"
+          torch_constraint = (
+              f"torch=={torch_version}+cpu"
+              if target.startswith(("linux-", "windows-"))
+              else f"torch=={torch_version}"
+          )
+          Path("release-build-constraints.txt").write_text(
+              torch_constraint + "\n", encoding="utf-8"
+          )
+          PY
+          if [[ "$RELEASE_TARGET" == linux-* || "$RELEASE_TARGET" == windows-* ]]; then
+            python -m pip install 'torch==2.12.1+cpu' \
+              --index-url https://download.pytorch.org/whl/cpu
+          else
+            python -m pip install --constraint release-build-constraints.txt torch
+          fi
+          python -m pip install \
+            --constraint release-build-constraints.txt \
+            --requirement release-build-requirements.txt
+          python -m pip install --no-deps -e src
+          python -m pip check
+          python - <<'PY'
+          import os
+          import torch
+
+          target = os.environ["RELEASE_TARGET"]
+          if target == "macos-x86_64":
+              expected = "2.2.2"
+          elif target.startswith("macos-"):
+              expected = "2.12.1"
+          else:
+              expected = "2.12.1+cpu"
+          if torch.__version__ != expected:
+              raise SystemExit(
+                  f"release build has torch {torch.__version__}, expected {expected}"
+              )
+          if torch.version.cuda is not None:
+              raise SystemExit(f"release build unexpectedly installed CUDA {torch.version.cuda}")
+          PY
+      - name: Build single-file binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then separator=';'; else separator=':'; fi
+          pyinstaller --onefile --clean --noconfirm \
+            --name biomem \
+            --add-data "src/memory_module/assets${separator}memory_module/assets" \
+            --hidden-import=sentence_transformers \
+            --hidden-import=torch \
+            --hidden-import=sklearn \
+            --hidden-import=scipy \
+            --hidden-import=cryptography \
+            --hidden-import=aiohttp \
+            --hidden-import=websockets \
+            --hidden-import=httpx \
+            --hidden-import=pypdf \
+            --hidden-import=PyQt6 \
+            --hidden-import=PyQt6.QtCore \
+            --hidden-import=PyQt6.QtGui \
+            --hidden-import=PyQt6.QtWidgets \
+            --hidden-import=PyQt6.QtPrintSupport \
+            src/run.py
+      - name: Require an ad-hoc signature on the macOS executable
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          signature_details="$(codesign -dvv dist/biomem 2>&1 || true)"
+          if ! grep -Fqx 'Signature=adhoc' <<< "$signature_details"; then
+            codesign --force --sign - --timestamp=none dist/biomem
+          fi
+          codesign --verify --strict --verbose=2 dist/biomem
+          codesign -dvv dist/biomem 2>&1 | grep -Fqx 'Signature=adhoc'
+      - name: Assemble and inspect canonical standalone archive
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then binary='dist/biomem.exe'; else binary='dist/biomem'; fi
+          python scripts/release/canonical_artifacts.py package \
+            --policy policy/release-policy.json \
+            --target "$RELEASE_TARGET" \
+            --binary "$binary" \
+            --license LICENSE \
+            --output-dir release-assets
+      - name: Enforce standalone asset size ceiling
+        env:
+          MAX_RELEASE_ASSET_BYTES: '1073741824'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$MAX_RELEASE_ASSET_BYTES" <<'PY'
+          from pathlib import Path
+          import sys
+
+          ceiling = int(sys.argv[1])
+          paths = [path for path in Path("dist").iterdir() if path.is_file()]
+          paths.extend(path for path in Path("release-assets").iterdir() if path.is_file())
+          if not paths:
+              raise SystemExit("no standalone files found for the size check")
+          oversized = [(path.as_posix(), path.stat().st_size) for path in paths
+                       if path.stat().st_size > ceiling]
+          if oversized:
+              raise SystemExit(f"standalone files exceed {ceiling} bytes: {oversized}")
+          for path in paths:
+              print(f"{path}: {path.stat().st_size} bytes (ceiling {ceiling})")
+          PY
+      - name: Record producer digest
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        shell: bash
+        run: |
+          python scripts/release/canonical_artifacts.py record-digest \
+            --producer "$RELEASE_TARGET" \
+            --source-sha "$SOURCE_SHA" \
+            --output "producer-digest-${RELEASE_TARGET}.json" \
+            release-assets/*
+      - name: Upload canonical standalone archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-core-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload standalone producer digest
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: producer-digest-${{ matrix.target }}
+          path: producer-digest-${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 14
+
+  exact-artifact-smoke:
+    name: Exact artifacts smoke (${{ matrix.target }})
+    needs: [verify, python-distributions, binaries]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.verify.outputs.targets) }}
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Download exact Python distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-core-python
+          path: exact-artifacts
+      - name: Download exact standalone archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-core-${{ matrix.target }}
+          path: exact-artifacts
+      - name: Set up clean smoke-test Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.target == 'macos-x86_64' && '3.12' || env.PYTHON_VERSION }}
+      - name: Install and smoke-test only the downloaded bytes
+        env:
+          RELEASE_TARGET: ${{ matrix.target }}
+        shell: bash
+        run: |
+          python scripts/release/canonical_artifacts.py smoke \
+            --policy policy/release-policy.json \
+            --target "$RELEASE_TARGET" \
+            --artifacts-dir exact-artifacts

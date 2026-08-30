@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "biomem-memory"
+version = "0.0.2"
+description = "biomem — portable cognitive memory for LLM conversations. Associative persistent memory engine in pure Python."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "biomem contributors" }]
+keywords = ["local-first", "memory", "llm", "browser-extension"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "torch>=2.1",
+    "sentence-transformers>=2.6,<6",
+    "transformers>=4.40,<5",
+    "scikit-learn>=1.3",
+    "numpy>=1.26,<2; platform_system == 'Darwin' and platform_machine == 'x86_64'",
+    "numpy>=1.26; platform_system != 'Darwin' or platform_machine != 'x86_64'",
+    "scipy>=1.11",
+    "aiohttp>=3.9",
+    "websockets>=12",
+    "httpx>=0.27",
+    "cryptography>=42",
+    "pypdf>=4.0",
+    "mcp==2.1.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/BleedingDev/biomem"
+Repository = "https://github.com/BleedingDev/biomem"
+Issues = "https://github.com/BleedingDev/biomem/issues"
+
+[project.optional-dependencies]
+gui = ["PyQt6>=6.6"]
+tray = ["pystray>=0.19", "Pillow>=10"]
+mcp = []
+all = ["PyQt6>=6.6", "pystray>=0.19", "Pillow>=10", "matplotlib>=3.8", "reportlab>=4.0"]
+
+[project.scripts]
+biomem-server = "memory_module.main:main"
+biomem = "memory_module.cli:main"
+biomem-mcp = "memory_module.mcp_server:main"
+
+[tool.setuptools]
+packages = ["memory_module", "memory_module.utils", "memory_module.assets"]
+
+[tool.setuptools.package-data]
+memory_module = ["assets/*"]

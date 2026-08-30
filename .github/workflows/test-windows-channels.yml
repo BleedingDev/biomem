@@ -1,0 +1,296 @@
+name: Windows package-manager lifecycle
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag to install after the upgrade
+        required: true
+        type: string
+      previous_tag:
+        description: Published earlier release tag to install first
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-channels-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  lifecycle:
+    name: WinGet and Scoop user-scope lifecycle
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      PYTHON_VERSION: '3.13'
+      PACKAGE_ID: BleedingDev.biomem
+    steps:
+      - name: Checkout the immutable current release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Fetch exact published assets or report an environment blocker
+        id: assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          function Get-Release([string] $Tag, [string] $Directory) {
+            New-Item -ItemType Directory -Path $Directory | Out-Null
+            gh release download $Tag --repo $env:GITHUB_REPOSITORY `
+              --dir $Directory `
+              --pattern 'biomem-windows-x86_64.zip' `
+              --pattern 'SHA256SUMS.txt'
+            if ($LASTEXITCODE -ne 0) {
+              "BLOCKED_ENVIRONMENT: release assets for $Tag are unavailable." >> $env:GITHUB_STEP_SUMMARY
+              exit 78
+            }
+          }
+          function Get-ExactHash([string] $Directory) {
+            $Name = 'biomem-windows-x86_64.zip'
+            $Digests = @(Get-Content "$Directory/SHA256SUMS.txt" | ForEach-Object {
+              $Match = [regex]::Match($_, "^([0-9a-f]{64})  $([regex]::Escape($Name))$")
+              if ($Match.Success) { $Match.Groups[1].Value }
+            })
+            if ($Digests.Count -ne 1) {
+              throw "SHA256SUMS.txt must contain exactly one canonical Windows ZIP entry"
+            }
+            return $Digests[0]
+          }
+          Get-Release $env:CURRENT_TAG 'release-current'
+          Get-Release $env:PREVIOUS_TAG 'release-previous'
+          "current_sha=$(Get-ExactHash 'release-current')" >> $env:GITHUB_OUTPUT
+          "previous_sha=$(Get-ExactHash 'release-previous')" >> $env:GITHUB_OUTPUT
+      - name: Resolve policies and generate hash-pinned metadata
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+          CURRENT_SHA: ${{ steps.assets.outputs.current_sha }}
+          PREVIOUS_SHA: ${{ steps.assets.outputs.previous_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $CurrentVersion = [version]($env:CURRENT_TAG.TrimStart('v'))
+          $PreviousVersion = [version]($env:PREVIOUS_TAG.TrimStart('v'))
+          if ($CurrentVersion -le $PreviousVersion) {
+            throw 'tag must be newer than previous_tag for a real upgrade test'
+          }
+          python scripts/release_policy.py policy --tag $env:CURRENT_TAG `
+            --channels winget,scoop --dry-run false --output current-policy.json
+          python scripts/release_policy.py policy --tag $env:PREVIOUS_TAG `
+            --channels winget,scoop --dry-run false --output previous-policy.json
+          python scripts/release/generate_windows_channels.py `
+            --policy current-policy.json `
+            --repository $env:GITHUB_REPOSITORY `
+            --archive release-current/biomem-windows-x86_64.zip `
+            --expected-sha256 $env:CURRENT_SHA `
+            --output-dir metadata-current
+          python scripts/release/generate_windows_channels.py `
+            --policy previous-policy.json `
+            --repository $env:GITHUB_REPOSITORY `
+            --archive release-previous/biomem-windows-x86_64.zip `
+            --expected-sha256 $env:PREVIOUS_SHA `
+            --output-dir metadata-previous
+      - name: Prove metadata is user-scoped and unsigned-friendly
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ inputs.tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $Installer = Get-Content `
+            "metadata-current/winget/$($env:CURRENT_TAG.TrimStart('v'))/$env:PACKAGE_ID.installer.yaml" `
+            -Raw
+          foreach ($Required in @(
+            'InstallerType: zip',
+            'NestedInstallerType: portable',
+            'Scope: user',
+            'RelativeFilePath: biomem.exe'
+          )) {
+            if (-not $Installer.Contains($Required)) { throw "missing contract: $Required" }
+          }
+          if ($Installer.Contains('SignatureSha256') -or $Installer.Contains('RunAs')) {
+            throw 'portable metadata must not require Authenticode or elevation'
+          }
+      - name: Validate current WinGet manifests
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ inputs.tag }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          winget --info
+          if ($LASTEXITCODE -ne 0) {
+            'BLOCKED_ENVIRONMENT: WinGet is unavailable on the Windows runner.' >> $env:GITHUB_STEP_SUMMARY
+            exit 78
+          }
+          winget validate --manifest "metadata-current/winget/$($env:CURRENT_TAG.TrimStart('v'))"
+      - name: Reject a hash mismatch and changed release location
+        shell: pwsh
+        env:
+          CURRENT_SHA: ${{ steps.assets.outputs.current_sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $BadSha = '0' * 64
+          python scripts/release/generate_windows_channels.py `
+            --policy current-policy.json `
+            --repository $env:GITHUB_REPOSITORY `
+            --archive release-current/biomem-windows-x86_64.zip `
+            --expected-sha256 $BadSha `
+            --output-dir rejected-hash
+          if ($LASTEXITCODE -eq 0 -or (Test-Path rejected-hash)) {
+            throw 'metadata generation accepted a deliberately incorrect SHA-256'
+          }
+          python scripts/release/generate_windows_channels.py `
+            --policy current-policy.json `
+            --repository "$env:GITHUB_REPOSITORY/releases/latest" `
+            --archive release-current/biomem-windows-x86_64.zip `
+            --expected-sha256 $env:CURRENT_SHA `
+            --output-dir rejected-location
+          if ($LASTEXITCODE -eq 0 -or (Test-Path rejected-location)) {
+            throw 'metadata generation accepted a changed or mutable release location'
+          }
+      - name: Upload validated submission metadata
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: windows-channel-metadata-${{ inputs.tag }}
+          path: metadata-current/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Check WinGet catalog availability
+        id: winget_catalog
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $Available = $true
+          foreach ($Version in @(
+            $env:PREVIOUS_TAG.TrimStart('v'),
+            $env:CURRENT_TAG.TrimStart('v')
+          )) {
+            winget show --id $env:PACKAGE_ID --exact --version $Version --source winget `
+              --accept-source-agreements --disable-interactivity
+            if ($LASTEXITCODE -ne 0) { $Available = $false }
+          }
+          if (-not $Available) {
+            'BLOCKED_ENVIRONMENT: both versions are not yet accepted in the WinGet catalog.' >> $env:GITHUB_STEP_SUMMARY
+            'available=false' >> $env:GITHUB_OUTPUT
+          } else {
+            'available=true' >> $env:GITHUB_OUTPUT
+          }
+      - name: Install, invoke, upgrade, and uninstall with WinGet
+        if: steps.winget_catalog.outputs.available == 'true'
+        shell: pwsh
+        env:
+          CURRENT_TAG: ${{ inputs.tag }}
+          PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $PreviousVersion = $env:PREVIOUS_TAG.TrimStart('v')
+          $CurrentVersion = $env:CURRENT_TAG.TrimStart('v')
+          winget install --id $env:PACKAGE_ID --exact `
+            --version $PreviousVersion --source winget --scope user `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet installation failed' }
+          $env:PATH = "$env:LOCALAPPDATA/Microsoft/WinGet/Links;$env:PATH"
+          if ((biomem --version) -notmatch "v$($env:PREVIOUS_TAG.TrimStart('v'))") {
+            throw 'WinGet installed the wrong previous version'
+          }
+          winget upgrade --id $env:PACKAGE_ID --exact `
+            --version $CurrentVersion --source winget --scope user `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet upgrade failed' }
+          if ((biomem --version) -notmatch "v$($env:CURRENT_TAG.TrimStart('v'))") {
+            throw 'WinGet installed the wrong current version'
+          }
+          winget uninstall --id $env:PACKAGE_ID --exact --scope user `
+            --source winget --disable-interactivity --purge
+          if ($LASTEXITCODE -ne 0) { throw 'WinGet uninstall failed' }
+          if (Get-Command biomem -ErrorAction SilentlyContinue) {
+            throw 'WinGet command alias survived uninstall'
+          }
+      - name: Checkout pinned Scoop installer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ScoopInstaller/Install
+          ref: 1e2f334083d609986d8c8bc9e31ae8e87c39fab4
+          path: scoop-install
+          persist-credentials: false
+      - name: Install Scoop for the current user
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
+            & ./scoop-install/install.ps1 -ScoopDir "$env:RUNNER_TEMP/scoop"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Scoop installer exited with code $LASTEXITCODE"
+            }
+            if (-not (Test-Path "$env:RUNNER_TEMP/scoop/shims/scoop.ps1")) {
+              throw 'Scoop installer did not create its command shim'
+            }
+            "$env:RUNNER_TEMP/scoop/shims" >> $env:GITHUB_PATH
+          } catch {
+            "BLOCKED_ENVIRONMENT: Scoop bootstrap failed: $($_.Exception.Message)" >> $env:GITHUB_STEP_SUMMARY
+            $_ | Out-String | Write-Host
+            exit 78
+          }
+      - name: Validate Scoop manifest and exercise its lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $env:PATH = "$env:RUNNER_TEMP/scoop/shims;$env:PATH"
+          $Bucket = "$env:RUNNER_TEMP/biomem-test-bucket"
+          New-Item -ItemType Directory -Path $Bucket | Out-Null
+          Copy-Item metadata-previous/scoop/biomem.json "$Bucket/biomem.json"
+          git -C $Bucket init --initial-branch main
+          git -C $Bucket config user.name 'biomem CI'
+          git -C $Bucket config user.email 'ci@invalid.example'
+          git -C $Bucket add biomem.json
+          git -C $Bucket commit -m 'previous metadata'
+          scoop bucket add biomem-test $Bucket
+          if ($LASTEXITCODE -ne 0) { throw 'Scoop bucket registration failed' }
+          scoop install biomem-test/biomem
+          if ($LASTEXITCODE -ne 0) { throw 'Scoop installation failed' }
+          $PreviousExpected = (Get-Content metadata-previous/scoop/biomem.json | ConvertFrom-Json).version
+          if ((biomem --version) -notmatch "v$PreviousExpected") {
+            throw 'Scoop installed the wrong previous version'
+          }
+          Copy-Item metadata-current/scoop/biomem.json "$Bucket/biomem.json" -Force
+          git -C $Bucket add biomem.json
+          git -C $Bucket commit -m 'current metadata'
+          scoop update
+          if ($LASTEXITCODE -ne 0) { throw 'Scoop or bucket refresh failed' }
+          scoop update biomem
+          if ($LASTEXITCODE -ne 0) { throw 'Scoop package upgrade failed' }
+          $Expected = (Get-Content metadata-current/scoop/biomem.json | ConvertFrom-Json).version
+          if ((biomem --version) -notmatch "v$Expected") { throw 'Scoop upgrade failed' }
+          scoop uninstall biomem
+          if ($LASTEXITCODE -ne 0) { throw 'Scoop uninstall failed' }
+          if (Get-Command biomem -ErrorAction SilentlyContinue) {
+            throw 'Scoop command shim survived uninstall'
+          }
+      - name: Preserve WinGet catalog blocker as a non-pass result
+        if: >-
+          always() &&
+          steps.winget_catalog.conclusion == 'success' &&
+          steps.winget_catalog.outputs.available != 'true'
+        shell: pwsh
+        run: |
+          'BLOCKED_ENVIRONMENT: WinGet catalog review is incomplete.' >> $env:GITHUB_STEP_SUMMARY
+          exit 78

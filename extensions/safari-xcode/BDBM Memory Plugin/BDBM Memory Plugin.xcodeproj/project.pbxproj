@@ -1,0 +1,1027 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		8ED9CFC2303F522E000A6974 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFC1303F522E000A6974 /* AppDelegate.swift */; };
+		8ED9CFC4303F522E000A6974 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFC3303F522E000A6974 /* SceneDelegate.swift */; };
+		8ED9CFC7303F522E000A6974 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFC5303F522E000A6974 /* LaunchScreen.storyboard */; };
+		8ED9CFCA303F522E000A6974 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFC8303F522E000A6974 /* Main.storyboard */; };
+		8ED9CFD3303F522E000A6974 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFD2303F522E000A6974 /* AppDelegate.swift */; };
+		8ED9CFD6303F522E000A6974 /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFD4303F522E000A6974 /* Main.storyboard */; };
+		8ED9CFDD303F522E000A6974 /* BDBM Memory Plugin Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8ED9CFDC303F522E000A6974 /* BDBM Memory Plugin Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8ED9CFE7303F522E000A6974 /* BDBM Memory Plugin Extension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 8ED9CFE6303F522E000A6974 /* BDBM Memory Plugin Extension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		8ED9CFEC303F522E000A6974 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB1303F522D000A6974 /* Main.html */; };
+		8ED9CFED303F522E000A6974 /* Main.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB1303F522D000A6974 /* Main.html */; };
+		8ED9CFEE303F522E000A6974 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB3303F522D000A6974 /* Icon.png */; };
+		8ED9CFEF303F522E000A6974 /* Icon.png in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB3303F522D000A6974 /* Icon.png */; };
+		8ED9CFF0303F522E000A6974 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB4303F522D000A6974 /* Style.css */; };
+		8ED9CFF1303F522E000A6974 /* Style.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB4303F522D000A6974 /* Style.css */; };
+		8ED9CFF2303F522E000A6974 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB5303F522D000A6974 /* Script.js */; };
+		8ED9CFF3303F522E000A6974 /* Script.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB5303F522D000A6974 /* Script.js */; };
+		8ED9CFF4303F522E000A6974 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB6303F522D000A6974 /* ViewController.swift */; };
+		8ED9CFF5303F522E000A6974 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB6303F522D000A6974 /* ViewController.swift */; };
+		8ED9CFF6303F522E000A6974 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB7303F522E000A6974 /* Assets.xcassets */; };
+		8ED9CFF7303F522E000A6974 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB7303F522E000A6974 /* Assets.xcassets */; };
+		8ED9CFF8303F522E000A6974 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB9303F522E000A6974 /* SafariWebExtensionHandler.swift */; };
+		8ED9CFF9303F522E000A6974 /* SafariWebExtensionHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8ED9CFB9303F522E000A6974 /* SafariWebExtensionHandler.swift */; };
+		8ED9D017303F522E000A6974 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00B303F522E000A6974 /* popup.js */; };
+		8ED9D018303F522E000A6974 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00C303F522E000A6974 /* background.js */; };
+		8ED9D019303F522E000A6974 /* popup.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00D303F522E000A6974 /* popup.html */; };
+		8ED9D01A303F522E000A6974 /* options.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00E303F522E000A6974 /* options.js */; };
+		8ED9D01B303F522E000A6974 /* content in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00F303F522E000A6974 /* content */; };
+		8ED9D01D303F522E000A6974 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D011303F522E000A6974 /* README.md */; };
+		8ED9D01E303F522E000A6974 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D012303F522E000A6974 /* manifest.json */; };
+		8ED9D01F303F522E000A6974 /* options.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D013303F522E000A6974 /* options.html */; };
+		8ED9D020303F522E000A6974 /* popup.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D014303F522E000A6974 /* popup.css */; };
+		8ED9D021303F522E000A6974 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D015303F522E000A6974 /* assets */; };
+		8ED9D022303F522E000A6974 /* options.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D016303F522E000A6974 /* options.css */; };
+		8ED9D023303F522E000A6974 /* popup.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00B303F522E000A6974 /* popup.js */; };
+		8ED9D024303F522E000A6974 /* background.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00C303F522E000A6974 /* background.js */; };
+		8ED9D025303F522E000A6974 /* popup.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00D303F522E000A6974 /* popup.html */; };
+		8ED9D026303F522E000A6974 /* options.js in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00E303F522E000A6974 /* options.js */; };
+		8ED9D027303F522E000A6974 /* content in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D00F303F522E000A6974 /* content */; };
+		8ED9D029303F522E000A6974 /* README.md in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D011303F522E000A6974 /* README.md */; };
+		8ED9D02A303F522E000A6974 /* manifest.json in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D012303F522E000A6974 /* manifest.json */; };
+		8ED9D02B303F522E000A6974 /* options.html in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D013303F522E000A6974 /* options.html */; };
+		8ED9D02C303F522E000A6974 /* popup.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D014303F522E000A6974 /* popup.css */; };
+		8ED9D02D303F522E000A6974 /* assets in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D015303F522E000A6974 /* assets */; };
+		8ED9D02E303F522E000A6974 /* options.css in Resources */ = {isa = PBXBuildFile; fileRef = 8ED9D016303F522E000A6974 /* options.css */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		8ED9CFDE303F522E000A6974 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8ED9CFAB303F522D000A6974 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8ED9CFDB303F522E000A6974;
+			remoteInfo = "BDBM Memory Plugin Extension (iOS)";
+		};
+		8ED9CFE8303F522E000A6974 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 8ED9CFAB303F522D000A6974 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8ED9CFE5303F522E000A6974;
+			remoteInfo = "BDBM Memory Plugin Extension (macOS)";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		8ED9CFFF303F522E000A6974 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8ED9CFDD303F522E000A6974 /* BDBM Memory Plugin Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9D006303F522E000A6974 /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				8ED9CFE7303F522E000A6974 /* BDBM Memory Plugin Extension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		8ED9CFB2303F522D000A6974 /* Base */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = Base; path = Base.lproj/Main.html; sourceTree = "<group>"; };
+		8ED9CFB3303F522D000A6974 /* Icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = Icon.png; sourceTree = "<group>"; };
+		8ED9CFB4303F522D000A6974 /* Style.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = Style.css; sourceTree = "<group>"; };
+		8ED9CFB5303F522D000A6974 /* Script.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = Script.js; sourceTree = "<group>"; };
+		8ED9CFB6303F522D000A6974 /* ViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewController.swift; sourceTree = "<group>"; };
+		8ED9CFB7303F522E000A6974 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8ED9CFB9303F522E000A6974 /* SafariWebExtensionHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SafariWebExtensionHandler.swift; sourceTree = "<group>"; };
+		8ED9CFBE303F522E000A6974 /* BDBM Memory Plugin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BDBM Memory Plugin.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8ED9CFC1303F522E000A6974 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		8ED9CFC3303F522E000A6974 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
+		8ED9CFC6303F522E000A6974 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/LaunchScreen.storyboard; sourceTree = "<group>"; };
+		8ED9CFC9303F522E000A6974 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		8ED9CFCB303F522E000A6974 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8ED9CFD0303F522E000A6974 /* BDBM Memory Plugin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BDBM Memory Plugin.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8ED9CFD2303F522E000A6974 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
+		8ED9CFD5303F522E000A6974 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
+		8ED9CFD7303F522E000A6974 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8ED9CFDC303F522E000A6974 /* BDBM Memory Plugin Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "BDBM Memory Plugin Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8ED9CFE1303F522E000A6974 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8ED9CFE6303F522E000A6974 /* BDBM Memory Plugin Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "BDBM Memory Plugin Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		8ED9CFEB303F522E000A6974 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8ED9D00B303F522E000A6974 /* popup.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = popup.js; path = "../../../safari-src/popup.js"; sourceTree = "<group>"; };
+		8ED9D00C303F522E000A6974 /* background.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = background.js; path = "../../../safari-src/background.js"; sourceTree = "<group>"; };
+		8ED9D00D303F522E000A6974 /* popup.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = popup.html; path = "../../../safari-src/popup.html"; sourceTree = "<group>"; };
+		8ED9D00E303F522E000A6974 /* options.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; name = options.js; path = "../../../safari-src/options.js"; sourceTree = "<group>"; };
+		8ED9D00F303F522E000A6974 /* content */ = {isa = PBXFileReference; lastKnownFileType = folder; name = content; path = "../../../safari-src/content"; sourceTree = "<group>"; };
+		8ED9D011303F522E000A6974 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; name = README.md; path = "../../../safari-src/README.md"; sourceTree = "<group>"; };
+		8ED9D012303F522E000A6974 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = manifest.json; path = "../../../safari-src/manifest.json"; sourceTree = "<group>"; };
+		8ED9D013303F522E000A6974 /* options.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; name = options.html; path = "../../../safari-src/options.html"; sourceTree = "<group>"; };
+		8ED9D014303F522E000A6974 /* popup.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = popup.css; path = "../../../safari-src/popup.css"; sourceTree = "<group>"; };
+		8ED9D015303F522E000A6974 /* assets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = assets; path = "../../../safari-src/assets"; sourceTree = "<group>"; };
+		8ED9D016303F522E000A6974 /* options.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; name = options.css; path = "../../../safari-src/options.css"; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		8ED9CFBB303F522E000A6974 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFCD303F522E000A6974 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFD9303F522E000A6974 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFE3303F522E000A6974 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		8ED9CFAA303F522D000A6974 = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFAF303F522D000A6974 /* Shared (App) */,
+				8ED9CFB8303F522E000A6974 /* Shared (Extension) */,
+				8ED9CFC0303F522E000A6974 /* iOS (App) */,
+				8ED9CFD1303F522E000A6974 /* macOS (App) */,
+				8ED9CFE0303F522E000A6974 /* iOS (Extension) */,
+				8ED9CFEA303F522E000A6974 /* macOS (Extension) */,
+				8ED9CFBF303F522E000A6974 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8ED9CFAF303F522D000A6974 /* Shared (App) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFB6303F522D000A6974 /* ViewController.swift */,
+				8ED9CFB7303F522E000A6974 /* Assets.xcassets */,
+				8ED9CFB0303F522D000A6974 /* Resources */,
+			);
+			path = "Shared (App)";
+			sourceTree = "<group>";
+		};
+		8ED9CFB0303F522D000A6974 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFB1303F522D000A6974 /* Main.html */,
+				8ED9CFB3303F522D000A6974 /* Icon.png */,
+				8ED9CFB4303F522D000A6974 /* Style.css */,
+				8ED9CFB5303F522D000A6974 /* Script.js */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		8ED9CFB8303F522E000A6974 /* Shared (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9D00A303F522E000A6974 /* Resources */,
+				8ED9CFB9303F522E000A6974 /* SafariWebExtensionHandler.swift */,
+			);
+			path = "Shared (Extension)";
+			sourceTree = "<group>";
+		};
+		8ED9CFBF303F522E000A6974 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFBE303F522E000A6974 /* BDBM Memory Plugin.app */,
+				8ED9CFD0303F522E000A6974 /* BDBM Memory Plugin.app */,
+				8ED9CFDC303F522E000A6974 /* BDBM Memory Plugin Extension.appex */,
+				8ED9CFE6303F522E000A6974 /* BDBM Memory Plugin Extension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		8ED9CFC0303F522E000A6974 /* iOS (App) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFC1303F522E000A6974 /* AppDelegate.swift */,
+				8ED9CFC3303F522E000A6974 /* SceneDelegate.swift */,
+				8ED9CFC5303F522E000A6974 /* LaunchScreen.storyboard */,
+				8ED9CFC8303F522E000A6974 /* Main.storyboard */,
+				8ED9CFCB303F522E000A6974 /* Info.plist */,
+			);
+			path = "iOS (App)";
+			sourceTree = "<group>";
+		};
+		8ED9CFD1303F522E000A6974 /* macOS (App) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFD2303F522E000A6974 /* AppDelegate.swift */,
+				8ED9CFD4303F522E000A6974 /* Main.storyboard */,
+				8ED9CFD7303F522E000A6974 /* Info.plist */,
+			);
+			path = "macOS (App)";
+			sourceTree = "<group>";
+		};
+		8ED9CFE0303F522E000A6974 /* iOS (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFE1303F522E000A6974 /* Info.plist */,
+			);
+			path = "iOS (Extension)";
+			sourceTree = "<group>";
+		};
+		8ED9CFEA303F522E000A6974 /* macOS (Extension) */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9CFEB303F522E000A6974 /* Info.plist */,
+			);
+			path = "macOS (Extension)";
+			sourceTree = "<group>";
+		};
+		8ED9D00A303F522E000A6974 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				8ED9D00B303F522E000A6974 /* popup.js */,
+				8ED9D00C303F522E000A6974 /* background.js */,
+				8ED9D00D303F522E000A6974 /* popup.html */,
+				8ED9D00E303F522E000A6974 /* options.js */,
+				8ED9D00F303F522E000A6974 /* content */,
+				8ED9D011303F522E000A6974 /* README.md */,
+				8ED9D012303F522E000A6974 /* manifest.json */,
+				8ED9D013303F522E000A6974 /* options.html */,
+				8ED9D014303F522E000A6974 /* popup.css */,
+				8ED9D015303F522E000A6974 /* assets */,
+				8ED9D016303F522E000A6974 /* options.css */,
+			);
+			name = Resources;
+			path = "Shared (Extension)";
+			sourceTree = SOURCE_ROOT;
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8ED9CFBD303F522E000A6974 /* BDBM Memory Plugin (iOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8ED9D000303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin (iOS)" */;
+			buildPhases = (
+				8ED9CFBA303F522E000A6974 /* Sources */,
+				8ED9CFBB303F522E000A6974 /* Frameworks */,
+				8ED9CFBC303F522E000A6974 /* Resources */,
+				8ED9CFFF303F522E000A6974 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8ED9CFDF303F522E000A6974 /* PBXTargetDependency */,
+			);
+			name = "BDBM Memory Plugin (iOS)";
+			packageProductDependencies = (
+			);
+			productName = "BDBM Memory Plugin (iOS)";
+			productReference = 8ED9CFBE303F522E000A6974 /* BDBM Memory Plugin.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8ED9CFCF303F522E000A6974 /* BDBM Memory Plugin (macOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8ED9D007303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin (macOS)" */;
+			buildPhases = (
+				8ED9CFCC303F522E000A6974 /* Sources */,
+				8ED9CFCD303F522E000A6974 /* Frameworks */,
+				8ED9CFCE303F522E000A6974 /* Resources */,
+				8ED9D006303F522E000A6974 /* Embed Foundation Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8ED9CFE9303F522E000A6974 /* PBXTargetDependency */,
+			);
+			name = "BDBM Memory Plugin (macOS)";
+			packageProductDependencies = (
+			);
+			productName = "BDBM Memory Plugin (macOS)";
+			productReference = 8ED9CFD0303F522E000A6974 /* BDBM Memory Plugin.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8ED9CFDB303F522E000A6974 /* BDBM Memory Plugin Extension (iOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8ED9CFFC303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin Extension (iOS)" */;
+			buildPhases = (
+				8ED9CFD8303F522E000A6974 /* Sources */,
+				8ED9CFD9303F522E000A6974 /* Frameworks */,
+				8ED9CFDA303F522E000A6974 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "BDBM Memory Plugin Extension (iOS)";
+			packageProductDependencies = (
+			);
+			productName = "BDBM Memory Plugin Extension (iOS)";
+			productReference = 8ED9CFDC303F522E000A6974 /* BDBM Memory Plugin Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		8ED9CFE5303F522E000A6974 /* BDBM Memory Plugin Extension (macOS) */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 8ED9D003303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin Extension (macOS)" */;
+			buildPhases = (
+				8ED9CFE2303F522E000A6974 /* Sources */,
+				8ED9CFE3303F522E000A6974 /* Frameworks */,
+				8ED9CFE4303F522E000A6974 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = "BDBM Memory Plugin Extension (macOS)";
+			packageProductDependencies = (
+			);
+			productName = "BDBM Memory Plugin Extension (macOS)";
+			productReference = 8ED9CFE6303F522E000A6974 /* BDBM Memory Plugin Extension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		8ED9CFAB303F522D000A6974 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+				TargetAttributes = {
+					8ED9CFBD303F522E000A6974 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					8ED9CFCF303F522E000A6974 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					8ED9CFDB303F522E000A6974 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+					8ED9CFE5303F522E000A6974 = {
+						CreatedOnToolsVersion = 26.4.1;
+					};
+				};
+			};
+			buildConfigurationList = 8ED9CFAE303F522D000A6974 /* Build configuration list for PBXProject "BDBM Memory Plugin" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 8ED9CFAA303F522D000A6974;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 8ED9CFBF303F522E000A6974 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8ED9CFBD303F522E000A6974 /* BDBM Memory Plugin (iOS) */,
+				8ED9CFCF303F522E000A6974 /* BDBM Memory Plugin (macOS) */,
+				8ED9CFDB303F522E000A6974 /* BDBM Memory Plugin Extension (iOS) */,
+				8ED9CFE5303F522E000A6974 /* BDBM Memory Plugin Extension (macOS) */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		8ED9CFBC303F522E000A6974 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFEE303F522E000A6974 /* Icon.png in Resources */,
+				8ED9CFC7303F522E000A6974 /* LaunchScreen.storyboard in Resources */,
+				8ED9CFEC303F522E000A6974 /* Main.html in Resources */,
+				8ED9CFF2303F522E000A6974 /* Script.js in Resources */,
+				8ED9CFF6303F522E000A6974 /* Assets.xcassets in Resources */,
+				8ED9CFCA303F522E000A6974 /* Main.storyboard in Resources */,
+				8ED9CFF0303F522E000A6974 /* Style.css in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFCE303F522E000A6974 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFEF303F522E000A6974 /* Icon.png in Resources */,
+				8ED9CFF1303F522E000A6974 /* Style.css in Resources */,
+				8ED9CFD6303F522E000A6974 /* Main.storyboard in Resources */,
+				8ED9CFF3303F522E000A6974 /* Script.js in Resources */,
+				8ED9CFF7303F522E000A6974 /* Assets.xcassets in Resources */,
+				8ED9CFED303F522E000A6974 /* Main.html in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFDA303F522E000A6974 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9D02C303F522E000A6974 /* popup.css in Resources */,
+				8ED9D024303F522E000A6974 /* background.js in Resources */,
+				8ED9D02E303F522E000A6974 /* options.css in Resources */,
+				8ED9D026303F522E000A6974 /* options.js in Resources */,
+				8ED9D025303F522E000A6974 /* popup.html in Resources */,
+				8ED9D029303F522E000A6974 /* README.md in Resources */,
+				8ED9D02A303F522E000A6974 /* manifest.json in Resources */,
+				8ED9D023303F522E000A6974 /* popup.js in Resources */,
+				8ED9D027303F522E000A6974 /* content in Resources */,
+				8ED9D02B303F522E000A6974 /* options.html in Resources */,
+				8ED9D02D303F522E000A6974 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFE4303F522E000A6974 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9D020303F522E000A6974 /* popup.css in Resources */,
+				8ED9D018303F522E000A6974 /* background.js in Resources */,
+				8ED9D022303F522E000A6974 /* options.css in Resources */,
+				8ED9D01A303F522E000A6974 /* options.js in Resources */,
+				8ED9D019303F522E000A6974 /* popup.html in Resources */,
+				8ED9D01D303F522E000A6974 /* README.md in Resources */,
+				8ED9D01E303F522E000A6974 /* manifest.json in Resources */,
+				8ED9D017303F522E000A6974 /* popup.js in Resources */,
+				8ED9D01B303F522E000A6974 /* content in Resources */,
+				8ED9D01F303F522E000A6974 /* options.html in Resources */,
+				8ED9D021303F522E000A6974 /* assets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		8ED9CFBA303F522E000A6974 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFF4303F522E000A6974 /* ViewController.swift in Sources */,
+				8ED9CFC2303F522E000A6974 /* AppDelegate.swift in Sources */,
+				8ED9CFC4303F522E000A6974 /* SceneDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFCC303F522E000A6974 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFF5303F522E000A6974 /* ViewController.swift in Sources */,
+				8ED9CFD3303F522E000A6974 /* AppDelegate.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFD8303F522E000A6974 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFF8303F522E000A6974 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		8ED9CFE2303F522E000A6974 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8ED9CFF9303F522E000A6974 /* SafariWebExtensionHandler.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8ED9CFDF303F522E000A6974 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8ED9CFDB303F522E000A6974 /* BDBM Memory Plugin Extension (iOS) */;
+			targetProxy = 8ED9CFDE303F522E000A6974 /* PBXContainerItemProxy */;
+		};
+		8ED9CFE9303F522E000A6974 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8ED9CFE5303F522E000A6974 /* BDBM Memory Plugin Extension (macOS) */;
+			targetProxy = 8ED9CFE8303F522E000A6974 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXVariantGroup section */
+		8ED9CFB1303F522D000A6974 /* Main.html */ = {
+			isa = PBXVariantGroup;
+			children = (
+				8ED9CFB2303F522D000A6974 /* Base */,
+			);
+			name = Main.html;
+			sourceTree = "<group>";
+		};
+		8ED9CFC5303F522E000A6974 /* LaunchScreen.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				8ED9CFC6303F522E000A6974 /* Base */,
+			);
+			name = LaunchScreen.storyboard;
+			sourceTree = "<group>";
+		};
+		8ED9CFC8303F522E000A6974 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				8ED9CFC9303F522E000A6974 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+		8ED9CFD4303F522E000A6974 /* Main.storyboard */ = {
+			isa = PBXVariantGroup;
+			children = (
+				8ED9CFD5303F522E000A6974 /* Base */,
+			);
+			name = Main.storyboard;
+			sourceTree = "<group>";
+		};
+/* End PBXVariantGroup section */
+
+/* Begin XCBuildConfiguration section */
+		8ED9CFFA303F522E000A6974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		8ED9CFFB303F522E000A6974 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		8ED9CFFD303F522E000A6974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari.Extension;
+				PRODUCT_NAME = "BDBM Memory Plugin Extension";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8ED9CFFE303F522E000A6974 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari.Extension;
+				PRODUCT_NAME = "BDBM Memory Plugin Extension";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		8ED9D001303F522E000A6974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari;
+				PRODUCT_NAME = "BDBM Memory Plugin";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		8ED9D002303F522E000A6974 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "iOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin";
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
+				INFOPLIST_KEY_UIMainStoryboardFile = Main;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari;
+				PRODUCT_NAME = "BDBM Memory Plugin";
+				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		8ED9D004303F522E000A6974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "macOS (Extension)/BDBM Memory Plugin Extension.entitlements";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari.Extension;
+				PRODUCT_NAME = "BDBM Memory Plugin Extension";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		8ED9D005303F522E000A6974 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "macOS (Extension)/BDBM Memory Plugin Extension.entitlements";
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (Extension)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin Extension";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari.Extension;
+				PRODUCT_NAME = "BDBM Memory Plugin Extension";
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		8ED9D008303F522E000A6974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "macOS (App)/BDBM Memory Plugin.entitlements";
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari;
+				PRODUCT_NAME = "BDBM Memory Plugin";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		8ED9D009303F522E000A6974 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "macOS (App)/BDBM Memory Plugin.entitlements";
+				CODE_SIGN_IDENTITY = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "macOS (App)/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "BDBM Memory Plugin";
+				INFOPLIST_KEY_NSMainStoryboardFile = Main;
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 10.14;
+				MARKETING_VERSION = 0.0.2;
+				OTHER_LDFLAGS = (
+					"-framework",
+					SafariServices,
+					"-framework",
+					WebKit,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.bleedingdev.biomem.safari;
+				PRODUCT_NAME = "BDBM Memory Plugin";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8ED9CFAE303F522D000A6974 /* Build configuration list for PBXProject "BDBM Memory Plugin" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8ED9CFFA303F522E000A6974 /* Debug */,
+				8ED9CFFB303F522E000A6974 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8ED9CFFC303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin Extension (iOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8ED9CFFD303F522E000A6974 /* Debug */,
+				8ED9CFFE303F522E000A6974 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8ED9D000303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin (iOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8ED9D001303F522E000A6974 /* Debug */,
+				8ED9D002303F522E000A6974 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8ED9D003303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin Extension (macOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8ED9D004303F522E000A6974 /* Debug */,
+				8ED9D005303F522E000A6974 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		8ED9D007303F522E000A6974 /* Build configuration list for PBXNativeTarget "BDBM Memory Plugin (macOS)" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8ED9D008303F522E000A6974 /* Debug */,
+				8ED9D009303F522E000A6974 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 8ED9CFAB303F522D000A6974 /* Project object */;
+}

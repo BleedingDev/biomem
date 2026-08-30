@@ -1,0 +1,191 @@
+name: Reusable Apple signing readiness
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      channel:
+        required: true
+        type: string
+      provider_credentials_configured:
+        description: Boolean presence signal for the common Apple credential set
+        required: true
+        type: boolean
+      channel_credentials_configured:
+        description: Boolean presence signal for channel-specific Apple credentials
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  readiness:
+    name: Apple signing and notarization boundary
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Validate requested Apple channel and freeze identity contract
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_TEAM_ID: ${{ vars.APPLE_EXPECTED_TEAM_ID }}
+          EXPECTED_APPLICATION_IDENTITY: ${{ vars.APPLE_EXPECTED_DEVELOPER_ID_APPLICATION }}
+          EXPECTED_INSTALLER_IDENTITY: ${{ vars.APPLE_EXPECTED_DEVELOPER_ID_INSTALLER }}
+        run: |
+          set -euo pipefail
+          case "$REQUESTED_CHANNEL" in
+            safari_public) expected_signer="$EXPECTED_APPLICATION_IDENTITY" ;;
+            macos_notarized_installer) expected_signer="$EXPECTED_INSTALLER_IDENTITY" ;;
+            *) echo "Unsupported Apple channel: $REQUESTED_CHANNEL" >&2; exit 2 ;;
+          esac
+          mkdir -p signing-readiness
+          python3 - "$REQUESTED_CHANNEL" "$SOURCE_SHA" "$EXPECTED_TEAM_ID" \
+            "$expected_signer" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          channel, source_sha, team_id, signer = sys.argv[1:]
+          identifiers = json.loads(Path("release/release-policy.json").read_text())["package_identifiers"]
+          bundle_ids = (
+              [identifiers["safari_host"], identifiers["safari_extension"]]
+              if channel == "safari_public"
+              else [identifiers["macos_cli"]]
+          )
+          Path("signing-readiness/apple-signing-boundary.json").write_text(json.dumps({
+              "schema_version": 1,
+              "channel": channel,
+              "source_sha": source_sha,
+              "provider": "apple_developer_id",
+              "input_contract": "already-tested artifact plus frozen SHA-256",
+              "expected_identity": {
+                  "signer": signer,
+                  "team_id": team_id,
+                  "bundle_ids": bundle_ids,
+              },
+              "output_contract": [
+                  "signed_artifact",
+                  "new_sha256",
+                  "verified_signer_team_and_bundles",
+                  "verified_secure_timestamp",
+                  "accepted_notarization_receipt",
+                  "validated_staple",
+                  "accepted_gatekeeper_assessment",
+                  "ready_for_assembly",
+              ],
+          }, indent=2, sort_keys=True) + "\n")
+          PY
+      - name: Evaluate Apple configuration without importing credentials
+        id: readiness
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
+          PROVIDER_CREDENTIALS_CONFIGURED: ${{ inputs.provider_credentials_configured && 'true' || '' }}
+          CHANNEL_CREDENTIALS_CONFIGURED: ${{ inputs.channel_credentials_configured && 'true' || '' }}
+          APPLE_EXPECTED_TEAM_ID: ${{ vars.APPLE_EXPECTED_TEAM_ID }}
+          APPLE_EXPECTED_DEVELOPER_ID_APPLICATION: ${{ vars.APPLE_EXPECTED_DEVELOPER_ID_APPLICATION }}
+          APPLE_EXPECTED_DEVELOPER_ID_INSTALLER: ${{ vars.APPLE_EXPECTED_DEVELOPER_ID_INSTALLER }}
+          APPLE_SIGNING_ENABLED: ${{ vars.APPLE_SIGNING_ENABLED }}
+        run: |
+          set -euo pipefail
+          required=(
+            PROVIDER_CREDENTIALS_CONFIGURED
+            CHANNEL_CREDENTIALS_CONFIGURED
+            APPLE_EXPECTED_TEAM_ID
+            APPLE_EXPECTED_DEVELOPER_ID_APPLICATION
+          )
+          if [[ "$REQUESTED_CHANNEL" == macos_notarized_installer ]]; then
+            required+=(APPLE_EXPECTED_DEVELOPER_ID_INSTALLER)
+          fi
+          args=()
+          for name in "${required[@]}"; do args+=(--required-env "$name"); done
+          python3 scripts/release/verify_signing_evidence.py readiness \
+            --channel "$REQUESTED_CHANNEL" \
+            --selected true \
+            --dry-run '${{ inputs.dry_run }}' \
+            "${args[@]}" \
+            --manual-enabled "${APPLE_SIGNING_ENABLED:-false}" \
+            --adapter-enabled false \
+            --output signing-readiness/provider-readiness.json
+
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("signing-readiness/provider-readiness.json")
+          value = json.loads(path.read_text())
+          expected_team = os.environ.get("APPLE_EXPECTED_TEAM_ID", "")
+          application = os.environ.get("APPLE_EXPECTED_DEVELOPER_ID_APPLICATION", "")
+          installer = os.environ.get("APPLE_EXPECTED_DEVELOPER_ID_INSTALLER", "")
+          channel = os.environ["REQUESTED_CHANNEL"]
+          identities = [application] + ([installer] if channel == "macos_notarized_installer" else [])
+          if value["reason_code"] != "missing_provider_configuration" and (
+              not expected_team
+              or any(not identity.endswith(f" ({expected_team})") for identity in identities)
+          ):
+              value["status"] = "blocked_environment"
+              value["reason_code"] = "identity_configuration_mismatch"
+          path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+          PY
+          read -r status reason < <(python3 - <<'PY'
+          import json
+          value = json.load(open("signing-readiness/provider-readiness.json"))
+          print(value["status"], value["reason_code"])
+          PY
+          )
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "reason=$reason" >> "$GITHUB_OUTPUT"
+
+          # Exact insertion point after explicit enablement: import credentials
+          # into an ephemeral keychain, build/sign, notarize, staple, run strict
+          # codesign and Gatekeeper checks, then call `verify ...`. This workflow
+          # intentionally performs none of those credentialed transformations.
+      - name: Record blocked channel evidence
+        shell: bash
+        env:
+          REQUESTED_CHANNEL: ${{ inputs.channel }}
+          REASON_CODE: ${{ steps.readiness.outputs.reason }}
+        run: |
+          mkdir -p channel-evidence
+          python3 scripts/release_policy.py evidence \
+            --policy policy/release-policy.json \
+            --channel "$REQUESTED_CHANNEL" \
+            --status blocked_environment \
+            --reason "$REASON_CODE" \
+            --output "channel-evidence/$REQUESTED_CHANNEL.json"
+      - name: Upload Apple evidence fragment
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-${{ inputs.channel }}
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload Apple boundary record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-signing-readiness-${{ inputs.channel }}
+          path: signing-readiness/
+          if-no-files-found: error
+          retention-days: 14

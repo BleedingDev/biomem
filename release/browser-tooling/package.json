@@ -1,0 +1,13 @@
+{
+  "name": "biomem-browser-release-tooling",
+  "version": "0.0.2",
+  "private": true,
+  "description": "Integrity-locked tooling used only by the browser release workflow.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "web-ext": "10.6.0"
+  }
+}

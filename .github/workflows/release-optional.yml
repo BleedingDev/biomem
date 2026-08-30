@@ -1,0 +1,142 @@
+name: Reusable optional release channels
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      signpath_credentials_configured:
+        required: true
+        type: boolean
+      apple_common_credentials_configured:
+        required: true
+        type: boolean
+      apple_installer_credentials_configured:
+        required: true
+        type: boolean
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  selection:
+    name: Resolve optional channel selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      windows_signed: ${{ steps.selected.outputs.windows_signed }}
+      macos_notarized_installer: ${{ steps.selected.outputs.macos_notarized_installer }}
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Export signing selections
+        id: selected
+        shell: bash
+        run: |
+          python3 - "$GITHUB_OUTPUT" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          selected = set(json.loads(Path("policy/release-policy.json").read_text())["selected_optional_channels"])
+          with Path(sys.argv[1]).open("a", encoding="utf-8") as output:
+              for channel in ("windows_signed", "macos_notarized_installer"):
+                  output.write(f"{channel}={str(channel in selected).lower()}\n")
+          PY
+
+  base-evidence:
+    name: Record non-signing and unselected channels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Record evidence without external publication
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p channel-evidence
+          mapfile -t rows < <(python3 - <<'PY'
+          import json
+
+          policy = json.load(open("policy/release-policy.json"))
+          contract = json.load(open("release/release-policy.json"))
+          selected = set(policy["selected_optional_channels"])
+          external_signing = {"windows_signed", "macos_notarized_installer"}
+          browser = {"chrome_web_store", "firefox_amo", "safari_public"}
+          for channel, definition in contract["channels"].items():
+              if definition["selection"] != "explicit":
+                  continue
+              # The browser workflow is the sole evidence owner for every
+              # selection and dry-run state of these channels.
+              if channel in browser:
+                  continue
+              if channel in selected and channel in external_signing and not policy["dry_run"]:
+                  continue
+              if channel not in selected:
+                  print(channel, "skipped_not_configured", "not_selected")
+              elif policy["dry_run"]:
+                  print(channel, "blocked_environment", "not_attempted_dry_run")
+              else:
+                  print(channel, "blocked_environment", "manual_enablement_required")
+          PY
+          )
+          for row in "${rows[@]}"; do
+            read -r channel status reason <<< "$row"
+            python3 scripts/release_policy.py evidence \
+              --policy policy/release-policy.json \
+              --channel "$channel" \
+              --status "$status" \
+              --reason "$reason" \
+              --output "channel-evidence/$channel.json"
+          done
+      - name: Upload base evidence fragment
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-base
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+
+  windows-signing:
+    name: Optional Windows signing readiness
+    needs: selection
+    if: needs.selection.outputs.windows_signed == 'true' && !inputs.dry_run
+    uses: ./.github/workflows/release-sign-windows.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      dry_run: ${{ inputs.dry_run }}
+      provider_credentials_configured: ${{ inputs.signpath_credentials_configured }}
+
+  macos-installer-signing:
+    name: Optional macOS installer signing readiness
+    needs: selection
+    if: needs.selection.outputs.macos_notarized_installer == 'true' && !inputs.dry_run
+    uses: ./.github/workflows/release-sign-apple.yml
+    with:
+      source_sha: ${{ inputs.source_sha }}
+      dry_run: ${{ inputs.dry_run }}
+      channel: macos_notarized_installer
+      provider_credentials_configured: ${{ inputs.apple_common_credentials_configured }}
+      channel_credentials_configured: ${{ inputs.apple_installer_credentials_configured }}

@@ -1,0 +1,608 @@
+name: Publish canonical Python distributions to PyPI
+
+on:
+  release:
+    types: [published]
+  repository_dispatch:
+    types: [canonical_release_published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published GitHub Release tag to verify or publish
+        required: true
+        type: string
+      dry_run:
+        description: Verify canonical artifacts without writing to PyPI
+        required: true
+        default: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: >-
+    pypi-${{ github.event_name == 'release' && github.event.release.tag_name ||
+              github.event_name == 'repository_dispatch' && github.event.client_payload.tag ||
+              inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: '3.13'
+  RELEASE_TAG: >-
+    ${{ github.event_name == 'release' && github.event.release.tag_name ||
+        github.event_name == 'repository_dispatch' && github.event.client_payload.tag ||
+        inputs.tag }}
+  DISPATCH_SOURCE_SHA: >-
+    ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.source_sha || '' }}
+  DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+
+jobs:
+  prepare:
+    name: Verify released wheel and sdist without rebuilding
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      attestations: read
+    outputs:
+      selected: ${{ steps.verify.outputs.selected }}
+      version: ${{ steps.verify.outputs.version }}
+      dry_run: ${{ steps.verify.outputs.dry_run }}
+      remote_exact: ${{ steps.remote.outputs.remote_exact }}
+    steps:
+      - name: Checkout the exact published tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Validate repository dispatch payload exactly
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$GITHUB_EVENT_PATH" "$EVENT_NAME" "$RELEASE_TAG" "$DISPATCH_SOURCE_SHA" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          event_path, event_name, release_tag, dispatch_source_sha = sys.argv[1:]
+          if event_name != "repository_dispatch":
+              raise SystemExit(0)
+          event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+          payload = event.get("client_payload")
+          if not isinstance(payload, dict) or set(payload) != {"tag", "source_sha"}:
+              raise SystemExit("repository dispatch payload must contain exactly tag and source_sha")
+          if payload["tag"] != release_tag or payload["source_sha"] != dispatch_source_sha:
+              raise SystemExit("repository dispatch expressions do not match the event payload")
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", release_tag):
+              raise SystemExit("repository dispatch tag is invalid")
+          if not re.fullmatch(r"[0-9a-f]{40}", dispatch_source_sha):
+              raise SystemExit("repository dispatch source_sha is invalid")
+          PY
+      - name: Download only canonical Python release assets and metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if ! command -v gh >/dev/null; then
+            echo 'BLOCKED_ENVIRONMENT: GitHub CLI capability is unavailable.' >&2
+            exit 3
+          fi
+          if ! gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > release-view.json 2> release-view.err; then
+            if grep -Eqi 'HTTP 401|HTTP 403|authentication|permission|resource not accessible' release-view.err; then
+              echo 'BLOCKED_ENVIRONMENT: cannot read the canonical GitHub Release.' >&2
+              exit 3
+            fi
+            echo 'FAILED: canonical published GitHub Release does not exist.' >&2
+            sed -n '1,20p' release-view.err >&2
+            exit 2
+          fi
+          python3 - "$RELEASE_TAG" <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+          release = json.loads(Path("release-view.json").read_text(encoding="utf-8"))
+          if release.get("tag_name") != sys.argv[1] or release.get("draft") is not False:
+              raise SystemExit("release precondition failed: tag is not a published GitHub Release")
+          if "immutable" not in release:
+              print("BLOCKED_ENVIRONMENT: GitHub Release immutability capability is unavailable.", file=sys.stderr)
+              raise SystemExit(3)
+          if release["immutable"] is not True:
+              print("FAILED: canonical GitHub Release is not immutable.", file=sys.stderr)
+              raise SystemExit(2)
+          PY
+          mkdir release-assets
+          if ! gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --dir release-assets \
+            --pattern 'biomem_memory-*.whl' \
+            --pattern 'biomem_memory-*.tar.gz' \
+            --pattern 'release-manifest.json' \
+            --pattern 'SHA256SUMS.txt' 2> release-download.err; then
+            if grep -Eqi 'HTTP 401|HTTP 403|authentication|permission|resource not accessible' release-download.err; then
+              echo 'BLOCKED_ENVIRONMENT: permission to read canonical GitHub Release assets is unavailable.' >&2
+              exit 3
+            fi
+            echo 'FAILED: canonical GitHub Release assets are missing or invalid.' >&2
+            sed -n '1,20p' release-download.err >&2
+            exit 2
+          fi
+      - name: Verify exact names, source SHA, sizes, and SHA-256 digests
+        id: verify
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/release_policy.py check-manifest \
+            --manifest release-assets/release-manifest.json
+          python3 - "$RELEASE_TAG" "$(git rev-parse HEAD)" "$GITHUB_OUTPUT" <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import sys
+
+          tag, source_sha, output_path = sys.argv[1:]
+          root = Path("release-assets")
+          manifest = json.loads((root / "release-manifest.json").read_text(encoding="utf-8"))
+          release = manifest["release"]
+          if release["tag"] != tag or release["source_sha"] != source_sha:
+              raise SystemExit("release manifest does not match the checked-out tag and source SHA")
+          dispatch_source_sha = os.environ["DISPATCH_SOURCE_SHA"]
+          if dispatch_source_sha and dispatch_source_sha != source_sha:
+              raise SystemExit("repository dispatch source_sha does not match the checked-out tag")
+          distributions = [
+              item for item in manifest["artifacts"]
+              if item["kind"] in {"python_wheel", "python_sdist"}
+          ]
+          expected_names = {item["name"] for item in distributions}
+          present_names = {
+              path.name for path in root.iterdir()
+              if path.name not in {"release-manifest.json", "SHA256SUMS.txt"}
+          }
+          if len(distributions) != 2 or expected_names != present_names:
+              raise SystemExit("GitHub Release did not provide exactly one canonical wheel and sdist")
+          checksum_lines = (root / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines()
+          checksums = {}
+          for line in checksum_lines:
+              digest, separator, name = line.partition("  ")
+              if separator != "  " or name in checksums or len(digest) != 64:
+                  raise SystemExit("SHA256SUMS.txt is malformed or contains duplicate entries")
+              checksums[name] = digest
+          manifest_digests = {item["name"]: item["sha256"] for item in manifest["artifacts"]}
+          if checksums != manifest_digests:
+              raise SystemExit("SHA256SUMS.txt does not exactly match release-manifest.json")
+          for item in distributions:
+              path = root / item["name"]
+              digest = hashlib.sha256(path.read_bytes()).hexdigest()
+              if path.stat().st_size != item["size"] or digest != item["sha256"]:
+                  raise SystemExit(f"canonical distribution digest mismatch: {path.name}")
+          selected = "pypi" in manifest["policy"]["selected_optional_channels"]
+          with open(output_path, "a", encoding="utf-8") as output:
+              output.write(f"selected={'true' if selected else 'false'}\n")
+              output.write(f"version={release['version']}\n")
+              output.write(f"dry_run={os.environ['DRY_RUN']}\n")
+          PY
+          mkdir dist
+          mv release-assets/biomem_memory-* dist/
+          python -m pip install --disable-pip-version-check twine pypi-attestations==0.0.30
+          python -m twine check dist/*
+      - name: Verify the GitHub provenance of the exact distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_sha="$(git rev-parse HEAD)"
+          for artifact in dist/*; do
+            if ! gh attestation verify "$artifact" \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-publish.yml" \
+              --source-digest "$source_sha" 2> gh-attestation.err; then
+              if grep -Eqi 'HTTP 401|HTTP 403|authentication|permission|resource not accessible|unknown command|unknown flag' gh-attestation.err; then
+                echo 'BLOCKED_ENVIRONMENT: GitHub attestation permission or CLI capability is unavailable.' >&2
+                exit 3
+              fi
+              echo "FAILED: GitHub provenance verification rejected $(basename "$artifact")." >&2
+              sed -n '1,20p' gh-attestation.err >&2
+              exit 2
+            fi
+          done
+      - name: Check whether the exact PyPI release already exists
+        id: remote
+        if: steps.verify.outputs.selected == 'true'
+        env:
+          RELEASE_VERSION: ${{ steps.verify.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RELEASE_VERSION" "$GITHUB_OUTPUT" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          from urllib.error import HTTPError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          def verify_publisher_identity(provenance, filename):
+              bundles = provenance.get("attestation_bundles")
+              if not bundles:
+                  raise SystemExit(f"PyPI provenance is absent for {filename}")
+              expected = {
+                  "environment": "pypi",
+                  "kind": "GitHub",
+                  "repository": "BleedingDev/biomem",
+                  "workflow": "publish-pypi.yml",
+              }
+              for bundle in bundles:
+                  publisher = bundle.get("publisher", {})
+                  if any(publisher.get(key) != value for key, value in expected.items()):
+                      raise SystemExit(f"unexpected PyPI Trusted Publisher identity for {filename}")
+
+          version, output_path = sys.argv[1:]
+          project = "biomem-memory"
+          try:
+              request = Request(
+                  f"https://pypi.org/pypi/{project}/{quote(version)}/json",
+                  headers={"Accept": "application/json"},
+              )
+              with urlopen(request, timeout=20) as response:
+                  remote = json.load(response)
+          except HTTPError as error:
+              if error.code == 404:
+                  raise SystemExit(0)
+              raise
+          local = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in Path("dist").iterdir()
+          }
+          remote_files = {item["filename"]: item["digests"]["sha256"] for item in remote["urls"]}
+          if remote_files != local:
+              raise SystemExit("PyPI already has this version with a non-canonical file set")
+          provenance_dir = Path("pypi-provenance")
+          provenance_dir.mkdir()
+          url_lines = []
+          for item in remote["urls"]:
+              filename = item["filename"]
+              provenance_url = (
+                  f"https://pypi.org/integrity/{project}/{quote(version)}/"
+                  f"{quote(filename)}/provenance"
+              )
+              request = Request(
+                  provenance_url,
+                  headers={"Accept": "application/vnd.pypi.integrity.v1+json"},
+              )
+              with urlopen(request, timeout=20) as response:
+                  provenance = json.load(response)
+              verify_publisher_identity(provenance, filename)
+              provenance_path = provenance_dir / f"{filename}.json"
+              provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+              url_lines.append(f"{filename}\t{item['url']}")
+          Path("pypi-urls.tsv").write_text("\n".join(url_lines) + "\n", encoding="utf-8")
+          PY
+          if [[ ! -f pypi-urls.tsv ]]; then
+            echo 'remote_exact=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          count=0
+          while IFS=$'\t' read -r filename url; do
+            pypi-attestations verify pypi \
+              --repository https://github.com/BleedingDev/biomem \
+              --provenance-file "pypi-provenance/$filename.json" \
+              "$url"
+            count=$((count + 1))
+          done < pypi-urls.tsv
+          [[ "$count" -eq 2 ]]
+          echo 'remote_exact=true' >> "$GITHUB_OUTPUT"
+      - name: Upload only the already-verified distribution bytes
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: verified-pypi-distributions
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+      - name: Record dry-run or unselected outcome
+        if: env.DRY_RUN == 'true' || steps.verify.outputs.selected != 'true'
+        env:
+          PYPI_SELECTED: ${{ steps.verify.outputs.selected }}
+        shell: bash
+        run: |
+          if [[ "$PYPI_SELECTED" != 'true' ]]; then
+            echo 'SKIPPED_NOT_CONFIGURED: pypi was not selected in the canonical release manifest.'
+          else
+            echo 'Dry-run preflight passed; no PyPI publication was attempted.'
+          fi
+
+  install-smoke:
+    name: uv and pipx exact-artifact smoke (${{ matrix.os }})
+    if: needs.prepare.outputs.selected == 'true'
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions: {}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-15]
+    steps:
+      - name: Download the verified canonical distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-pypi-distributions
+          path: dist
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.7'
+          enable-cache: true
+      - name: Install, upgrade, and uninstall exact wheel and sdist with uv
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=''
+          [[ "$RUNNER_OS" == 'Windows' ]] && suffix='.exe'
+          for artifact in dist/*; do
+            artifact_id="$(basename "$artifact" | tr -c 'A-Za-z0-9' '-')"
+            export UV_TOOL_DIR="$RUNNER_TEMP/uv-tools-$artifact_id"
+            export UV_TOOL_BIN_DIR="$RUNNER_TEMP/uv-bin-$artifact_id"
+            uv tool install "$artifact"
+            "$UV_TOOL_BIN_DIR/biomem$suffix" --help
+            "$UV_TOOL_BIN_DIR/biomem-server$suffix" --version
+            "$UV_TOOL_BIN_DIR/biomem-mcp$suffix" --help
+            uv tool upgrade biomem-memory
+            "$UV_TOOL_BIN_DIR/biomem$suffix" --help
+            "$UV_TOOL_BIN_DIR/biomem-server$suffix" --version
+            "$UV_TOOL_BIN_DIR/biomem-mcp$suffix" --help
+            uv tool uninstall biomem-memory
+            [[ ! -e "$UV_TOOL_BIN_DIR/biomem$suffix" ]]
+          done
+      - name: Install, upgrade, and uninstall exact wheel and sdist with pipx
+        shell: bash
+        run: |
+          set -euo pipefail
+          suffix=''
+          [[ "$RUNNER_OS" == 'Windows' ]] && suffix='.exe'
+          python_executable="$(python -c 'import sys; print(sys.executable)')"
+          for artifact in dist/*; do
+            artifact_id="$(basename "$artifact" | tr -c 'A-Za-z0-9' '-')"
+            export PIPX_HOME="$RUNNER_TEMP/pipx-home-$artifact_id"
+            export PIPX_BIN_DIR="$RUNNER_TEMP/pipx-bin-$artifact_id"
+            export PIPX_MAN_DIR="$RUNNER_TEMP/pipx-man-$artifact_id"
+            uvx pipx install --python "$python_executable" "$artifact"
+            "$PIPX_BIN_DIR/biomem$suffix" --help
+            "$PIPX_BIN_DIR/biomem-server$suffix" --version
+            "$PIPX_BIN_DIR/biomem-mcp$suffix" --help
+            uvx pipx upgrade biomem-memory
+            "$PIPX_BIN_DIR/biomem$suffix" --help
+            "$PIPX_BIN_DIR/biomem-server$suffix" --version
+            "$PIPX_BIN_DIR/biomem-mcp$suffix" --help
+            uvx pipx uninstall biomem-memory
+            [[ ! -e "$PIPX_BIN_DIR/biomem$suffix" ]]
+          done
+
+  publish:
+    name: Publish once through PyPI Trusted Publishing
+    if: >-
+      ${{ needs.prepare.outputs.selected == 'true' &&
+          needs.prepare.outputs.dry_run != 'true' &&
+          needs.prepare.outputs.remote_exact != 'true' }}
+    needs: [prepare, install-smoke]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: pypi
+      url: https://pypi.org/p/biomem-memory
+    permissions:
+      id-token: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-pypi-distributions
+          path: dist
+      - name: Verify OIDC and Trusted Publisher prerequisites without retaining a token
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import json
+          import os
+          import sys
+          from urllib.error import HTTPError
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          request_url = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_URL", "")
+          request_token = os.environ.get("ACTIONS_ID_TOKEN_REQUEST_TOKEN", "")
+          if not request_url or not request_token:
+              print("BLOCKED_ENVIRONMENT: GitHub OIDC permission is unavailable.", file=sys.stderr)
+              raise SystemExit(3)
+          try:
+              with urlopen("https://pypi.org/_/oidc/audience", timeout=10) as response:
+                  audience = json.load(response)["audience"]
+              separator = "&" if "?" in request_url else "?"
+              request = Request(
+                  request_url + separator + urlencode({"audience": audience}),
+                  headers={"Authorization": f"Bearer {request_token}"},
+              )
+              with urlopen(request, timeout=10) as response:
+                  oidc_token = json.load(response)["value"]
+          except HTTPError as error:
+              if error.code in {401, 403}:
+                  print("BLOCKED_ENVIRONMENT: GitHub refused the OIDC credential.", file=sys.stderr)
+                  raise SystemExit(3)
+              print(f"FAILED: OIDC provider request failed with HTTP {error.code}.", file=sys.stderr)
+              raise SystemExit(2)
+          except (OSError, ValueError, KeyError) as error:
+              print(f"FAILED: OIDC provider request failed: {type(error).__name__}.", file=sys.stderr)
+              raise SystemExit(2)
+          mint = Request(
+              "https://pypi.org/_/oidc/mint-token",
+              data=json.dumps({"token": oidc_token}).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST",
+          )
+          try:
+              with urlopen(mint, timeout=10) as response:
+                  minted = json.load(response)
+          except HTTPError as error:
+              try:
+                  body = json.loads(error.read().decode("utf-8", "replace"))
+              except (ValueError, TypeError):
+                  print(f"FAILED: PyPI token exchange returned HTTP {error.code} without a valid error body.", file=sys.stderr)
+                  raise SystemExit(2)
+              codes = {item.get("code") for item in body.get("errors", [])}
+              if codes & {"invalid-publisher", "publisher-not-found", "project-not-found"}:
+                  print("BLOCKED_ENVIRONMENT: PyPI project or Trusted Publisher association is unavailable.", file=sys.stderr)
+                  raise SystemExit(3)
+              print(f"FAILED: PyPI token exchange was rejected: {sorted(codes)}", file=sys.stderr)
+              raise SystemExit(2)
+          except (OSError, ValueError, KeyError) as error:
+              print(f"FAILED: PyPI token exchange failed: {type(error).__name__}.", file=sys.stderr)
+              raise SystemExit(2)
+          if not isinstance(minted.get("token"), str) or not minted["token"]:
+              print("FAILED: PyPI token exchange returned no credential.", file=sys.stderr)
+              raise SystemExit(2)
+          # Deliberately discard the short-lived token; the pinned publish action obtains its own.
+          PY
+      - name: Publish with OIDC and generate PyPI attestations
+        id: pypi
+        continue-on-error: true
+        uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26 # v1.14.2
+        with:
+          packages-dir: dist/
+          print-hash: true
+      - name: Classify upload or provider rejection
+        if: steps.pypi.outcome == 'failure'
+        shell: bash
+        run: |
+          echo 'FAILED: PyPI rejected the already-verified distributions or the publishing provider failed.' >&2
+          exit 2
+
+  post-publish:
+    name: Verify PyPI bytes, attestations, and uv installation
+    if: >-
+      ${{ always() && needs.prepare.result == 'success' &&
+          needs.prepare.outputs.selected == 'true' &&
+          needs.prepare.outputs.dry_run != 'true' &&
+          (needs.publish.result == 'success' ||
+           (needs.publish.result == 'skipped' && needs.prepare.outputs.remote_exact == 'true')) }}
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions: {}
+    steps:
+      - name: Download the verified canonical distributions
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: verified-pypi-distributions
+          path: dist
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.12.7'
+      - name: Verify exact PyPI digests and Integrity API attestations
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "$RELEASE_VERSION" <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          import time
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          def verify_publisher_identity(provenance, filename):
+              bundles = provenance.get("attestation_bundles")
+              if not bundles:
+                  raise SystemExit(f"PyPI provenance is absent for {filename}")
+              expected = {
+                  "environment": "pypi",
+                  "kind": "GitHub",
+                  "repository": "BleedingDev/biomem",
+                  "workflow": "publish-pypi.yml",
+              }
+              for bundle in bundles:
+                  publisher = bundle.get("publisher", {})
+                  if any(publisher.get(key) != value for key, value in expected.items()):
+                      raise SystemExit(f"unexpected PyPI Trusted Publisher identity for {filename}")
+
+          version = sys.argv[1]
+          project = "biomem-memory"
+          local = {
+              path.name: hashlib.sha256(path.read_bytes()).hexdigest()
+              for path in Path("dist").iterdir()
+          }
+          remote_files = None
+          for attempt in range(10):
+              try:
+                  request = Request(
+                      f"https://pypi.org/pypi/{project}/{quote(version)}/json",
+                      headers={"Accept": "application/json"},
+                  )
+                  with urlopen(request, timeout=20) as response:
+                      remote = json.load(response)
+                  remote_files = {
+                      item["filename"]: item["digests"]["sha256"] for item in remote["urls"]
+                  }
+                  if remote_files == local:
+                      break
+              except Exception:
+                  if attempt == 9:
+                      raise
+              time.sleep(6)
+          if remote_files != local:
+              raise SystemExit("PyPI file names or SHA-256 digests differ from the GitHub Release")
+          provenance_dir = Path("pypi-provenance")
+          provenance_dir.mkdir()
+          url_lines = []
+          for item in remote["urls"]:
+              filename = item["filename"]
+              request = Request(
+                  f"https://pypi.org/integrity/{project}/{quote(version)}/"
+                  f"{quote(filename)}/provenance",
+                  headers={"Accept": "application/vnd.pypi.integrity.v1+json"},
+              )
+              with urlopen(request, timeout=20) as response:
+                  provenance = json.load(response)
+              verify_publisher_identity(provenance, filename)
+              provenance_path = provenance_dir / f"{filename}.json"
+              provenance_path.write_text(json.dumps(provenance), encoding="utf-8")
+              url_lines.append(f"{filename}\t{item['url']}")
+          Path("pypi-urls.tsv").write_text("\n".join(url_lines) + "\n", encoding="utf-8")
+          PY
+          count=0
+          while IFS=$'\t' read -r filename url; do
+            uvx --from pypi-attestations==0.0.30 pypi-attestations verify pypi \
+              --repository https://github.com/BleedingDev/biomem \
+              --provenance-file "pypi-provenance/$filename.json" \
+              "$url"
+            count=$((count + 1))
+          done < pypi-urls.tsv
+          [[ "$count" -eq 2 ]]
+      - name: Install exact version with uv and run a non-destructive CLI smoke test
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv tool install "biomem-memory==$RELEASE_VERSION"
+          "$(uv tool dir --bin)/biomem" --help
+          uv tool uninstall biomem-memory

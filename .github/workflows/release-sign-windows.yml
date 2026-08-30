@@ -1,0 +1,141 @@
+name: Reusable Windows signing readiness
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+      dry_run:
+        required: true
+        type: boolean
+      provider_credentials_configured:
+        description: Boolean presence signal computed by the top-level caller
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  readiness:
+    name: SignPath Foundation boundary
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13'
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Download already-tested canonical Windows artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-core-windows-x86_64
+          path: signing-input
+      - name: Freeze digest at the provider boundary
+        id: digest
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_SIGNER_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SIGNER_SUBJECT }}
+        run: |
+          $artifact = Get-Item 'signing-input/biomem-windows-x86_64.zip'
+          if ($artifact.LinkType) { throw 'Signing input must not be a symlink.' }
+          $digest = (Get-FileHash $artifact.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$digest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          New-Item -ItemType Directory -Force -Path signing-readiness | Out-Null
+          [ordered]@{
+            schema_version = 1
+            channel = 'windows_signed'
+            source_sha = $env:SOURCE_SHA
+            provider = 'signpath_foundation'
+            input = [ordered]@{
+              name = $artifact.Name
+              sha256 = $digest
+            }
+            expected_signer = $env:EXPECTED_SIGNER_SUBJECT
+            output_contract = @(
+              'signed_artifact'
+              'new_sha256'
+              'verified_signer'
+              'verified_timestamp'
+              'provider_receipt'
+              'ready_for_assembly'
+            )
+          } | ConvertTo-Json -Depth 5 | Set-Content signing-readiness/windows-signing-boundary.json
+      - name: Evaluate SignPath configuration without signing
+        id: readiness
+        shell: pwsh
+        env:
+          PROVIDER_CREDENTIALS_CONFIGURED: ${{ inputs.provider_credentials_configured && 'true' || '' }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          SIGNPATH_EXPECTED_SIGNER_SUBJECT: ${{ vars.SIGNPATH_EXPECTED_SIGNER_SUBJECT }}
+          SIGNPATH_FOUNDATION_ACCEPTED: ${{ vars.SIGNPATH_FOUNDATION_ACCEPTED }}
+          WINDOWS_SIGNING_ENABLED: ${{ vars.WINDOWS_SIGNING_ENABLED }}
+        run: |
+          $manualEnabled = (
+            $env:SIGNPATH_FOUNDATION_ACCEPTED -eq 'true' -and
+            $env:WINDOWS_SIGNING_ENABLED -eq 'true'
+          ).ToString().ToLowerInvariant()
+          python scripts/release/verify_signing_evidence.py readiness `
+            --channel windows_signed `
+            --selected true `
+            --dry-run '${{ inputs.dry_run }}' `
+            --required-env PROVIDER_CREDENTIALS_CONFIGURED `
+            --required-env SIGNPATH_ORGANIZATION_ID `
+            --required-env SIGNPATH_PROJECT_SLUG `
+            --required-env SIGNPATH_SIGNING_POLICY_SLUG `
+            --required-env SIGNPATH_ARTIFACT_CONFIGURATION_SLUG `
+            --required-env SIGNPATH_EXPECTED_SIGNER_SUBJECT `
+            --manual-enabled $manualEnabled `
+            --adapter-enabled false `
+            --output signing-readiness/provider-readiness.json
+          $readiness = Get-Content signing-readiness/provider-readiness.json | ConvertFrom-Json
+          "status=$($readiness.status)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "reason=$($readiness.reason_code)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          # Exact insertion point after Foundation acceptance:
+          # upload the frozen input as a GitHub artifact, submit it through the
+          # pinned official SignPath action, verify the returned Authenticode
+          # signature/timestamp/signer, then call `verify ...` before upload.
+          # There is intentionally no signing request in this readiness workflow.
+      - name: Record blocked channel evidence
+        shell: pwsh
+        env:
+          REASON_CODE: ${{ steps.readiness.outputs.reason }}
+        run: |
+          New-Item -ItemType Directory -Force -Path channel-evidence | Out-Null
+          python scripts/release_policy.py evidence `
+            --policy policy/release-policy.json `
+            --channel windows_signed `
+            --status blocked_environment `
+            --reason $env:REASON_CODE `
+            --output channel-evidence/windows_signed.json
+      - name: Upload Windows evidence fragment
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence-fragment-windows-signed
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload digest boundary record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-signing-readiness-windows
+          path: signing-readiness/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,123 @@
+* {
+    box-sizing: border-box;
+    -webkit-user-drag: none;
+}
+
+:root {
+    color-scheme: light dark;
+    font: -apple-system-body;
+}
+
+html,
+body {
+    min-height: 100%;
+    margin: 0;
+}
+
+body {
+    display: grid;
+    place-items: center;
+    padding: 28px;
+    color: CanvasText;
+    background: Canvas;
+    text-align: center;
+}
+
+main {
+    width: min(100%, 430px);
+}
+
+.app-icon {
+    border-radius: 20px;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+}
+
+h1 {
+    margin: 18px 0 8px;
+    font: -apple-system-title1;
+    font-weight: 700;
+}
+
+.intro,
+.guidance,
+.privacy {
+    margin: 0;
+    color: color-mix(in srgb, CanvasText 70%, transparent);
+    line-height: 1.45;
+}
+
+.status-list {
+    margin: 24px 0 18px;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+    border-radius: 12px;
+    background: color-mix(in srgb, CanvasText 5%, Canvas);
+    text-align: left;
+}
+
+.status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px 14px;
+}
+
+.status-row + .status-row {
+    border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent);
+}
+
+.status {
+    white-space: nowrap;
+    font-size: 0.88em;
+}
+
+.status-enabled,
+.status-running {
+    color: #248a3d;
+}
+
+.status-disabled,
+.status-offline,
+.status-unavailable {
+    color: #d70015;
+}
+
+.status-checking {
+    color: color-mix(in srgb, CanvasText 55%, transparent);
+}
+
+.actions {
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+button {
+    min-width: 132px;
+    padding: 7px 14px;
+    border: 0;
+    border-radius: 8px;
+    font: inherit;
+}
+
+button.primary {
+    color: white;
+    background: #0a84ff;
+}
+
+button.secondary {
+    background: color-mix(in srgb, CanvasText 10%, Canvas);
+}
+
+.privacy {
+    margin-top: 18px;
+    font-size: 0.84em;
+}
+
+body:not(.platform-mac, .platform-ios) :is(.platform-mac, .platform-ios),
+body.platform-ios .platform-mac,
+body.platform-mac .platform-ios {
+    display: none;
+}

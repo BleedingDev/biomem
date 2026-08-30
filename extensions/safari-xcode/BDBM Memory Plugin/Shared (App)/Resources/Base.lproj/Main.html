@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+    <link rel="stylesheet" href="../Style.css">
+    <script src="../Script.js" defer></script>
+    <title>Biomem for Safari</title>
+</head>
+<body>
+    <main>
+        <img class="app-icon" src="../Icon.png" width="96" height="96" alt="Biomem icon">
+        <h1>Biomem for Safari</h1>
+        <p class="intro">Private memory for your browser, stored and processed on this Mac.</p>
+
+        <section class="status-list platform-mac" aria-label="Installation status">
+            <div class="status-row">
+                <span>Safari extension</span>
+                <strong id="extension-status" class="status status-checking">Checking…</strong>
+            </div>
+            <div class="status-row">
+                <span>Local Biomem service</span>
+                <strong id="service-status" class="status status-checking">Checking…</strong>
+            </div>
+        </section>
+
+        <p class="platform-ios">Enable Biomem in Settings → Apps → Safari → Extensions.</p>
+        <p id="guidance" class="platform-mac guidance">Keep Biomem running locally, then enable the extension in Safari Settings.</p>
+
+        <div class="actions platform-mac">
+            <button class="primary open-preferences">Open Safari Settings</button>
+            <button class="secondary refresh-status">Check again</button>
+        </div>
+
+        <p class="privacy">Memories and embeddings stay on this device.</p>
+    </main>
+</body>
+</html>

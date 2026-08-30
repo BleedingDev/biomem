@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "product": {
+    "slug": "biomem",
+    "python_distribution": "biomem-memory",
+    "python_import": "memory_module"
+  },
+  "targets": [
+    {"os": "ubuntu-24.04", "target": "linux-x86_64", "archive": "tar.gz"},
+    {"os": "ubuntu-24.04-arm", "target": "linux-aarch64", "archive": "tar.gz"},
+    {"os": "windows-2025", "target": "windows-x86_64", "archive": "zip"},
+    {"os": "macos-15-intel", "target": "macos-x86_64", "archive": "tar.gz"},
+    {"os": "macos-15", "target": "macos-arm64", "archive": "tar.gz"}
+  ],
+  "package_identifiers": {
+    "pypi": "biomem-memory",
+    "chrome": "ieaccoddpikoeaphgmamfknkkodmamge",
+    "winget": "BleedingDev.biomem",
+    "scoop": "biomem",
+    "firefox": "biomem@bleedingdev.github.io",
+    "safari_host": "com.bleedingdev.biomem.safari",
+    "safari_extension": "com.bleedingdev.biomem.safari.Extension",
+    "macos_cli": "com.bleedingdev.biomem.cli"
+  },
+  "channels": {
+    "github_release": {"class": "core", "cost": "zero", "selection": "always"},
+    "direct_cli": {"class": "core", "cost": "zero", "selection": "always"},
+    "pypi": {"class": "optional", "cost": "zero", "selection": "explicit"},
+    "winget": {"class": "optional", "cost": "zero", "selection": "explicit"},
+    "scoop": {"class": "optional", "cost": "zero", "selection": "explicit"},
+    "firefox_amo": {"class": "optional", "cost": "zero", "selection": "explicit"},
+    "chrome_web_store": {"class": "optional", "cost": "low_cost", "selection": "explicit"},
+    "safari_public": {"class": "optional", "cost": "paid", "selection": "explicit"},
+    "macos_notarized_installer": {"class": "optional", "cost": "paid", "selection": "explicit"},
+    "windows_signed": {"class": "optional", "cost": "conditional", "selection": "explicit"}
+  },
+  "channel_statuses": [
+    "published",
+    "skipped_not_configured",
+    "blocked_environment",
+    "failed"
+  ]
+}

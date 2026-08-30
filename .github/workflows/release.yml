@@ -1,0 +1,155 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing semantic-version tag to validate or release
+        required: true
+        type: string
+      dry_run:
+        description: Build and validate without publication writes
+        required: true
+        default: true
+        type: boolean
+      channels:
+        description: Comma-separated optional channels, or none
+        required: true
+        default: none
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve immutable source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.source.outputs.tag }}
+      source_sha: ${{ steps.source.outputs.source_sha }}
+    steps:
+      - name: Checkout tag without persisted credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve and validate tag once
+        id: source
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          RELEASE_DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+          WORKFLOW_REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          source_sha="$(git rev-parse "$RELEASE_TAG^{commit}")"
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$source_sha" == "$(git rev-parse HEAD)" ]]
+          if [[ "$RELEASE_DRY_RUN" != "true" ]]; then
+            [[ "$WORKFLOW_REF" == "refs/tags/$RELEASE_TAG" ]]
+            [[ "$WORKFLOW_SHA" == "$source_sha" ]]
+          fi
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          git merge-base --is-ancestor "$source_sha" origin/main
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+
+  core:
+    name: Core release contract
+    needs: resolve
+    uses: ./.github/workflows/release-core.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      channels: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'none' }}
+
+  optional-channels:
+    name: Optional channel gates
+    needs: [resolve, core]
+    uses: ./.github/workflows/release-optional.yml
+    with:
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      signpath_credentials_configured: ${{ vars.SIGNPATH_CREDENTIALS_CONFIGURED == 'true' }}
+      apple_common_credentials_configured: ${{ vars.APPLE_COMMON_CREDENTIALS_CONFIGURED == 'true' }}
+      apple_installer_credentials_configured: ${{ vars.APPLE_INSTALLER_CREDENTIALS_CONFIGURED == 'true' }}
+
+  browser-channels:
+    name: Browser publication boundaries
+    needs: [resolve, core]
+    uses: ./.github/workflows/publish-browser-channels.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+      channels: ${{ github.event_name == 'workflow_dispatch' && inputs.channels || 'none' }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+      reuse_release_policy_artifact: true
+      apple_common_credentials_configured: ${{ vars.APPLE_COMMON_CREDENTIALS_CONFIGURED == 'true' }}
+      apple_safari_credentials_configured: ${{ vars.APPLE_SAFARI_CREDENTIALS_CONFIGURED == 'true' }}
+    secrets:
+      CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+      CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+      CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+      AMO_JWT_ISSUER: ${{ secrets.AMO_JWT_ISSUER }}
+      AMO_JWT_SECRET: ${{ secrets.AMO_JWT_SECRET }}
+
+  collect-evidence:
+    name: Collect exact channel evidence
+    needs: [resolve, core, optional-channels, browser-channels]
+    if: ${{ always() && needs.core.result == 'success' }}
+    uses: ./.github/workflows/release-collect-evidence.yml
+    with:
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+
+  finalize:
+    name: Finalize canonical release
+    needs: [resolve, core, collect-evidence]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release-publish.yml
+    with:
+      tag: ${{ needs.resolve.outputs.tag }}
+      source_sha: ${{ needs.resolve.outputs.source_sha }}
+      dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
+    secrets:
+      IMMUTABLE_RELEASES_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_TOKEN }}
+
+  enforce-selected-channels:
+    name: Enforce explicitly selected channel outcomes
+    needs: [resolve, finalize]
+    if: >-
+      ${{ always() && needs.finalize.result == 'success' &&
+          !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.source_sha }}
+          persist-credentials: false
+      - name: Download the exact published manifest
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: canonical-release-publication
+          path: publication
+      - name: Fail the lane for selected blocked or failed channels
+        run: |
+          python scripts/release_policy.py check-manifest \
+            --manifest publication/payload/release-manifest.json \
+            --enforce-selected

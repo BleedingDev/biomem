@@ -1,0 +1,21 @@
+{
+  "product": "biomem",
+  "healthy_status": "success",
+  "protocol_version": 1,
+  "health_transport": "http",
+  "health_command": "health",
+  "health_method": "GET",
+  "health_path": "/api/health",
+  "command_method": "POST",
+  "command_path": "/api",
+  "loopback_origin": "http://127.0.0.1:8766",
+  "service_unavailable_code": "SERVICE_UNAVAILABLE",
+  "provider_origins": [
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://claude.ai/*",
+    "https://www.perplexity.ai/*",
+    "https://perplexity.ai/*"
+  ]
+}

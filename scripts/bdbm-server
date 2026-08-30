@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# biomem server launcher for macOS (run from source, no install required).
+# Usage:  ./scripts/bdbm-server [args...]   (e.g. --no-gui, --debug, --port 8765)
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="${BDBM_PYTHON:-$DIR/.venv-mac/bin/python}"
+if [ ! -x "$PY" ]; then
+  echo "No venv at $PY — create it first:" >&2
+  echo "  python3 -m venv .venv-mac && .venv-mac/bin/pip install -r $DIR/requirements.txt" >&2
+  exit 1
+fi
+cd "$DIR"
+exec "$PY" src/run.py "$@"

@@ -1,0 +1,120 @@
+name: Reusable release channel evidence collector
+
+on:
+  workflow_call:
+    inputs:
+      source_sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  collect:
+    name: Assemble exact optional-channel evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout immutable source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Download resolved policy
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-policy
+          path: policy
+      - name: Download evidence fragments without overwrite merging
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-channel-evidence-fragment-*
+          path: fragments
+      - name: Reject missing, duplicate, misplaced, or non-canonical evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import sys
+
+          sys.path.insert(0, "scripts")
+          import release_policy
+
+          policy = json.loads(Path("policy/release-policy.json").read_text())
+          contract = release_policy.load_contract()
+          optional = {
+              name for name, definition in contract["channels"].items()
+              if definition["selection"] == "explicit"
+          }
+          browser_sources = {
+              "chrome_web_store": "release-channel-evidence-fragment-chrome-web-store",
+              "firefox_amo": "release-channel-evidence-fragment-firefox-amo",
+              # Selected non-dry Safari delegates to the shared Apple boundary,
+              # whose artifact name follows the channel's underscore spelling.
+              # The mutually exclusive local classifier uses the hyphenated
+              # browser artifact name for unselected and dry-run states.
+              "safari_public": (
+                  "release-channel-evidence-fragment-safari_public"
+                  if "safari_public" in policy["selected_optional_channels"]
+                  and not policy["dry_run"]
+                  else "release-channel-evidence-fragment-safari-public"
+              ),
+          }
+          fragments = Path("fragments")
+          if not fragments.is_dir():
+              raise SystemExit("release channel evidence fragments are missing")
+
+          occurrences = {channel: [] for channel in optional}
+          for artifact in sorted(fragments.iterdir()):
+              if artifact.is_symlink() or not artifact.is_dir():
+                  raise SystemExit(f"invalid evidence artifact entry: {artifact.name}")
+              if not artifact.name.startswith("release-channel-evidence-fragment-"):
+                  raise SystemExit(f"unexpected evidence artifact: {artifact.name}")
+              evidence_files = sorted(artifact.rglob("*.json"))
+              if not evidence_files:
+                  raise SystemExit(f"empty evidence artifact: {artifact.name}")
+              for path in evidence_files:
+                  if path.is_symlink() or not path.is_file():
+                      raise SystemExit(f"invalid evidence file: {path}")
+                  item = json.loads(path.read_text(encoding="utf-8"))
+                  channel = item.get("channel")
+                  if channel not in optional:
+                      raise SystemExit(f"unexpected optional evidence channel: {channel!r}")
+                  canonical = release_policy.make_evidence(
+                      policy,
+                      channel,
+                      item.get("status", ""),
+                      item.get("reason_code", ""),
+                      item.get("receipt"),
+                  )
+                  if item != canonical:
+                      raise SystemExit(f"non-canonical channel evidence: {channel}")
+                  occurrences[channel].append((artifact.name, canonical))
+
+          for channel, rows in sorted(occurrences.items()):
+              if len(rows) != 1:
+                  raise SystemExit(
+                      f"expected exactly one evidence fragment for {channel}, found {len(rows)}"
+                  )
+              expected_source = browser_sources.get(channel)
+              if expected_source is not None and rows[0][0] != expected_source:
+                  raise SystemExit(
+                      f"browser evidence for {channel} came from {rows[0][0]}, "
+                      f"expected {expected_source}"
+                  )
+
+          output = Path("channel-evidence")
+          output.mkdir()
+          for channel, rows in sorted(occurrences.items()):
+              release_policy.write_json(output / f"{channel}.json", rows[0][1])
+          PY
+      - name: Upload the only combined channel evidence artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-channel-evidence
+          path: channel-evidence/
+          if-no-files-found: error
+          retention-days: 14
